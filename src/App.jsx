@@ -574,9 +574,7 @@ export default function App() {
   );
 }
 
-function App() {
-  const [count, setCount] = useState(0)
-
+function _unused() {
   return (
     <>
       <section id="center">
@@ -683,10 +681,6 @@ function App() {
         </div>
       </section>
 
-      <div className="ticks"></div>
-      <section id="spacer"></section>
     </>
   )
 }
-
-export default App
