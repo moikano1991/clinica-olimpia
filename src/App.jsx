@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { supabase } from "./supabase";
 
 const COLORS = {
   bg: "#0a0f1e",
@@ -15,22 +16,8 @@ const COLORS = {
   textDim: "#475569",
 };
 
-const initialPatients = [
-  { id: 1, name: "María González", rut: "12.345.678-9", phone: "56912345678", email: "maria@email.com", dob: "1985-03-15", address: "Los Robles 123, Temuco", notes: "Alérgica a penicilina" },
-  { id: 2, name: "Carlos Muñoz", rut: "9.876.543-2", phone: "56987654321", email: "carlos@email.com", dob: "1978-07-22", address: "Av. Alemania 456", notes: "" },
-];
-
-const initialAppointments = [
-  { id: 1, patientId: 1, date: "2026-05-14", time: "10:00", duration: 60, treatment: "Limpieza dental", status: "confirmada", notes: "", dentist: "Dr. Rodrigo Soto" },
-  { id: 2, patientId: 2, date: "2026-05-14", time: "11:30", duration: 45, treatment: "Extracción", status: "pendiente", notes: "Revisar Rx previa", dentist: "Dr. Rodrigo Soto" },
-  { id: 3, patientId: 1, date: "2026-05-15", time: "09:00", duration: 90, treatment: "Blanqueamiento", status: "pendiente", notes: "", dentist: "Dr. Rodrigo Soto" },
-];
-
-const initialTreatments = [
-  { id: 1, patientId: 1, date: "2026-04-10", procedure: "Limpieza dental", tooth: "-", cost: 35000, paid: 35000, status: "completado", notes: "Sin complicaciones" },
-  { id: 2, patientId: 2, date: "2026-04-15", procedure: "Radiografía panorámica", tooth: "-", cost: 18000, paid: 18000, status: "completado", notes: "" },
-  { id: 3, patientId: 1, date: "2026-05-05", procedure: "Obturación resina", tooth: "36", cost: 45000, paid: 0, status: "pendiente pago", notes: "" },
-];
+const toAppt = (r) => ({ ...r, patientId: r.patient_id });
+const toTreat = (r) => ({ ...r, patientId: r.patient_id });
 
 const treatmentCatalog = ["Limpieza dental", "Extracción simple", "Extracción quirúrgica", "Obturación resina", "Obturación amalgama", "Radiografía periapical", "Radiografía panorámica", "Blanqueamiento", "Corona cerámica", "Prótesis removible", "Implante", "Endodoncia", "Periodoncia", "Ortodoncia consulta", "Sellantes"];
 
@@ -73,15 +60,24 @@ function AgendaView({ appointments, patients, setAppointments, setView, setSelec
   const dayAppts = appointments.filter(a => a.date === selectedDate).sort((a, b) => a.time.localeCompare(b.time));
   const getPatient = (id) => patients.find(p => p.id === Number(id));
 
-  const saveAppt = () => {
+  const saveAppt = async () => {
     if (!form.patientId || !form.date || !form.time) return;
-    const newAppt = { ...form, id: Date.now(), patientId: Number(form.patientId), duration: Number(form.duration) };
-    setAppointments(prev => [...prev, newAppt]);
-    setShowForm(false);
-    setSelectedDate(form.date);
+    const { data, error } = await supabase.from("appointments").insert([{
+      patient_id: Number(form.patientId), date: form.date, time: form.time,
+      duration: Number(form.duration), treatment: form.treatment,
+      dentist: form.dentist, notes: form.notes, status: form.status,
+    }]).select().single();
+    if (!error) {
+      setAppointments(prev => [...prev, toAppt(data)]);
+      setShowForm(false);
+      setSelectedDate(form.date);
+    }
   };
 
-  const updateStatus = (id, status) => setAppointments(prev => prev.map(a => a.id === id ? { ...a, status } : a));
+  const updateStatus = async (id, status) => {
+    await supabase.from("appointments").update({ status }).eq("id", id);
+    setAppointments(prev => prev.map(a => a.id === id ? { ...a, status } : a));
+  };
 
   const buildWAMessage = (appt) => {
     const p = getPatient(appt.patientId);
@@ -217,11 +213,17 @@ function PatientsView({ patients, setPatients, appointments, treatments, selecte
 
   const filtered = patients.filter(p => p.name.toLowerCase().includes(search.toLowerCase()) || p.rut.includes(search) || p.phone.includes(search));
 
-  const savePatient = () => {
+  const savePatient = async () => {
     if (!form.name) return;
-    setPatients(prev => [...prev, { ...form, id: Date.now() }]);
-    setForm({ name: "", rut: "", phone: "", email: "", dob: "", address: "", notes: "" });
-    setShowForm(false);
+    const { data, error } = await supabase.from("patients").insert([{
+      name: form.name, rut: form.rut, phone: form.phone, email: form.email,
+      dob: form.dob, address: form.address, notes: form.notes,
+    }]).select().single();
+    if (!error) {
+      setPatients(prev => [...prev, data]);
+      setForm({ name: "", rut: "", phone: "", email: "", dob: "", address: "", notes: "" });
+      setShowForm(false);
+    }
   };
 
   if (detail) {
@@ -352,18 +354,25 @@ function TreatmentsView({ treatments, setTreatments, patients }) {
 
   const getPatient = (id) => patients.find(p => p.id === Number(id));
 
-  const save = () => {
+  const save = async () => {
     if (!form.patientId || !form.procedure) return;
-    setTreatments(prev => [...prev, { ...form, id: Date.now(), patientId: Number(form.patientId), cost: Number(form.cost), paid: Number(form.paid) }]);
-    setShowForm(false);
+    const { data, error } = await supabase.from("treatments").insert([{
+      patient_id: Number(form.patientId), date: form.date, procedure: form.procedure,
+      tooth: form.tooth, cost: Number(form.cost), paid: Number(form.paid),
+      status: form.status, notes: form.notes,
+    }]).select().single();
+    if (!error) {
+      setTreatments(prev => [...prev, toTreat(data)]);
+      setShowForm(false);
+    }
   };
 
-  const registerPayment = (id, amount) => {
-    setTreatments(prev => prev.map(t => {
-      if (t.id !== id) return t;
-      const newPaid = Math.min(t.paid + amount, t.cost);
-      return { ...t, paid: newPaid, status: newPaid >= t.cost ? "completado" : "pendiente pago" };
-    }));
+  const registerPayment = async (id, amount) => {
+    const t = treatments.find(t => t.id === id);
+    const newPaid = Math.min(t.paid + amount, t.cost);
+    const newStatus = newPaid >= t.cost ? "completado" : "pendiente pago";
+    await supabase.from("treatments").update({ paid: newPaid, status: newStatus }).eq("id", id);
+    setTreatments(prev => prev.map(t => t.id === id ? { ...t, paid: newPaid, status: newStatus } : t));
   };
 
   const sorted = [...treatments].sort((a, b) => b.date.localeCompare(a.date));
@@ -503,10 +512,24 @@ const inputStyle = {
 
 export default function App() {
   const [view, setView] = useState("dashboard");
-  const [patients, setPatients] = useState(initialPatients);
-  const [appointments, setAppointments] = useState(initialAppointments);
-  const [treatments, setTreatments] = useState(initialTreatments);
+  const [patients, setPatients] = useState([]);
+  const [appointments, setAppointments] = useState([]);
+  const [treatments, setTreatments] = useState([]);
   const [selectedPatient, setSelectedPatient] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    Promise.all([
+      supabase.from("patients").select("*").order("name"),
+      supabase.from("appointments").select("*").order("date"),
+      supabase.from("treatments").select("*").order("date", { ascending: false }),
+    ]).then(([p, a, t]) => {
+      setPatients(p.data || []);
+      setAppointments((a.data || []).map(toAppt));
+      setTreatments((t.data || []).map(toTreat));
+      setLoading(false);
+    });
+  }, []);
 
   const tabs = [
     { id: "dashboard", label: "Inicio", icon: "🏠" },
@@ -514,6 +537,13 @@ export default function App() {
     { id: "patients", label: "Pacientes", icon: "👥" },
     { id: "treatments", label: "Clínico", icon: "🦷" },
   ];
+
+  if (loading) return (
+    <div style={{ minHeight: "100vh", background: COLORS.bg, display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: 16 }}>
+      <div style={{ fontSize: 40 }}>🦷</div>
+      <div style={{ color: COLORS.textMuted, fontSize: 14 }}>Cargando datos...</div>
+    </div>
+  );
 
   return (
     <div style={{ minHeight: "100vh", background: COLORS.bg, fontFamily: "'Segoe UI', system-ui, sans-serif", color: COLORS.text }}>
