@@ -510,6 +510,48 @@ const inputStyle = {
   borderRadius: 8, padding: "9px 12px", color: COLORS.text, fontSize: 14, outline: "none",
 };
 
+function LoginView({ onLogin }) {
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  const handleLogin = async (e) => {
+    e.preventDefault();
+    setLoading(true);
+    setError("");
+    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    if (error) { setError("Email o contraseña incorrectos"); setLoading(false); }
+    else onLogin();
+  };
+
+  return (
+    <div style={{ minHeight: "100vh", background: COLORS.bg, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+      <div style={{ background: COLORS.surface, border: `1px solid ${COLORS.border}`, borderRadius: 20, padding: 36, width: "100%", maxWidth: 380 }}>
+        <div style={{ textAlign: "center", marginBottom: 28 }}>
+          <div style={{ fontSize: 48, marginBottom: 10 }}>🦷</div>
+          <div style={{ fontWeight: 800, fontSize: 20, color: COLORS.text }}>Clínica Olimpia</div>
+          <div style={{ fontSize: 12, color: COLORS.textDim, marginTop: 4 }}>Arturo Prat 350, Of. 506 · Temuco</div>
+        </div>
+        <form onSubmit={handleLogin} style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          <div>
+            <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>Email</label>
+            <input type="email" value={email} onChange={e => setEmail(e.target.value)} style={inputStyle} required autoFocus />
+          </div>
+          <div>
+            <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>Contraseña</label>
+            <input type="password" value={password} onChange={e => setPassword(e.target.value)} style={inputStyle} required />
+          </div>
+          {error && <div style={{ color: COLORS.danger, fontSize: 13, textAlign: "center" }}>{error}</div>}
+          <button type="submit" disabled={loading} style={{ background: COLORS.accent, color: "#fff", border: "none", borderRadius: 8, padding: "11px", fontWeight: 700, cursor: "pointer", fontSize: 15, marginTop: 4 }}>
+            {loading ? "Ingresando..." : "Ingresar"}
+          </button>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const [view, setView] = useState("dashboard");
   const [patients, setPatients] = useState([]);
@@ -517,8 +559,23 @@ export default function App() {
   const [treatments, setTreatments] = useState([]);
   const [selectedPatient, setSelectedPatient] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [session, setSession] = useState(null);
 
   useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSession(session);
+      if (session) loadData();
+      else setLoading(false);
+    });
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_e, session) => {
+      setSession(session);
+      if (session) loadData();
+    });
+    return () => subscription.unsubscribe();
+  }, []);
+
+  const loadData = () => {
+    setLoading(true);
     Promise.all([
       supabase.from("patients").select("*").order("name"),
       supabase.from("appointments").select("*").order("date"),
@@ -529,7 +586,12 @@ export default function App() {
       setTreatments((t.data || []).map(toTreat));
       setLoading(false);
     });
-  }, []);
+  };
+
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+    setPatients([]); setAppointments([]); setTreatments([]);
+  };
 
   const tabs = [
     { id: "dashboard", label: "Inicio", icon: "🏠" },
@@ -541,9 +603,11 @@ export default function App() {
   if (loading) return (
     <div style={{ minHeight: "100vh", background: COLORS.bg, display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: 16 }}>
       <div style={{ fontSize: 40 }}>🦷</div>
-      <div style={{ color: COLORS.textMuted, fontSize: 14 }}>Cargando datos...</div>
+      <div style={{ color: COLORS.textMuted, fontSize: 14 }}>Cargando...</div>
     </div>
   );
+
+  if (!session) return <LoginView onLogin={loadData} />;
 
   return (
     <div style={{ minHeight: "100vh", background: COLORS.bg, fontFamily: "'Segoe UI', system-ui, sans-serif", color: COLORS.text }}>
@@ -552,7 +616,7 @@ export default function App() {
           <div style={{ fontWeight: 800, fontSize: 16, color: COLORS.text, letterSpacing: -0.5 }}>🦷 Clínica Olimpia</div>
           <div style={{ fontSize: 11, color: COLORS.textDim }}>Arturo Prat 350, Of. 506 · Temuco</div>
         </div>
-        <div style={{ fontSize: 12, color: COLORS.textMuted }}>{new Date().toLocaleDateString("es-CL", { weekday: "short", day: "numeric", month: "short" })}</div>
+        <button onClick={handleLogout} style={{ background: "none", border: `1px solid ${COLORS.border}`, borderRadius: 6, color: COLORS.textMuted, cursor: "pointer", fontSize: 11, padding: "4px 10px" }}>Salir</button>
       </div>
 
       <div style={{ padding: "20px 16px", maxWidth: 700, margin: "0 auto", paddingBottom: 90 }}>
