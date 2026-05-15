@@ -206,7 +206,9 @@ function AgendaView({ appointments, patients, setAppointments, setView, setSelec
 function PatientsView({ patients, setPatients, appointments, treatments, selectedPatient, setSelectedPatient }) {
   const [search, setSearch] = useState("");
   const [showForm, setShowForm] = useState(false);
+  const [showEditForm, setShowEditForm] = useState(false);
   const [form, setForm] = useState({ name: "", rut: "", phone: "", email: "", dob: "", address: "", notes: "" });
+  const [editForm, setEditForm] = useState({ name: "", rut: "", phone: "", email: "", dob: "", address: "", notes: "" });
   const [detail, setDetail] = useState(selectedPatient || null);
 
   useEffect(() => { if (selectedPatient) setDetail(selectedPatient); }, [selectedPatient]);
@@ -226,12 +228,34 @@ function PatientsView({ patients, setPatients, appointments, treatments, selecte
     }
   };
 
+  const updatePatient = async (id) => {
+    if (!editForm.name) return;
+    const { data, error } = await supabase.from("patients").update({
+      name: editForm.name, rut: editForm.rut, phone: editForm.phone, email: editForm.email,
+      dob: editForm.dob, address: editForm.address, notes: editForm.notes,
+    }).eq("id", id).select().single();
+    if (!error) {
+      setPatients(prev => prev.map(p => p.id === id ? data : p));
+      setShowEditForm(false);
+    }
+  };
+
   if (detail) {
     const p = patients.find(pt => pt.id === detail);
     if (!p) { setDetail(null); setSelectedPatient(null); return null; }
     const pAppts = appointments.filter(a => a.patientId === p.id).sort((a, b) => b.date.localeCompare(a.date));
     const pTreat = treatments.filter(t => t.patientId === p.id).sort((a, b) => b.date.localeCompare(a.date));
     const totalDebt = pTreat.reduce((s, t) => s + (t.cost - t.paid), 0);
+
+    const fields = [
+      { label: "Nombre completo *", key: "name", type: "text" },
+      { label: "RUT", key: "rut", type: "text" },
+      { label: "Teléfono", key: "phone", type: "text" },
+      { label: "Email", key: "email", type: "email" },
+      { label: "Fecha de nacimiento", key: "dob", type: "date" },
+      { label: "Dirección", key: "address", type: "text" },
+      { label: "Alertas / Alergias", key: "notes", type: "text" },
+    ];
 
     return (
       <div>
@@ -249,12 +273,38 @@ function PatientsView({ patients, setPatients, appointments, treatments, selecte
               </div>
               {p.notes && <div style={{ marginTop: 10, background: COLORS.warning + "11", border: `1px solid ${COLORS.warning}33`, borderRadius: 8, padding: "8px 12px", color: COLORS.warning, fontSize: 13 }}>⚠️ {p.notes}</div>}
             </div>
-            <div style={{ textAlign: "right" }}>
-              <div style={{ color: COLORS.textMuted, fontSize: 12 }}>Saldo pendiente</div>
-              <div style={{ color: totalDebt > 0 ? COLORS.danger : COLORS.success, fontWeight: 700, fontSize: 24 }}>{formatCLP(totalDebt)}</div>
+            <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 8 }}>
+              <div style={{ textAlign: "right" }}>
+                <div style={{ color: COLORS.textMuted, fontSize: 12 }}>Saldo pendiente</div>
+                <div style={{ color: totalDebt > 0 ? COLORS.danger : COLORS.success, fontWeight: 700, fontSize: 24 }}>{formatCLP(totalDebt)}</div>
+              </div>
+              <button onClick={() => { setEditForm({ name: p.name, rut: p.rut || "", phone: p.phone || "", email: p.email || "", dob: p.dob || "", address: p.address || "", notes: p.notes || "" }); setShowEditForm(true); }}
+                style={{ background: COLORS.accent + "22", color: COLORS.accent, border: `1px solid ${COLORS.accent}44`, borderRadius: 8, padding: "6px 14px", fontSize: 13, cursor: "pointer", fontWeight: 600 }}>
+                ✏️ Editar
+              </button>
             </div>
           </div>
         </div>
+
+        {showEditForm && (
+          <div style={{ position: "fixed", inset: 0, background: "#00000088", zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+            <div style={{ background: COLORS.surface, border: `1px solid ${COLORS.border}`, borderRadius: 16, padding: 28, width: "100%", maxWidth: 480, maxHeight: "90vh", overflowY: "auto" }}>
+              <h3 style={{ color: COLORS.text, margin: "0 0 20px" }}>Editar Paciente</h3>
+              <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+                {fields.map(f => (
+                  <div key={f.key}>
+                    <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>{f.label}</label>
+                    <input type={f.type} value={editForm[f.key]} onChange={e => setEditForm(prev => ({ ...prev, [f.key]: e.target.value }))} style={inputStyle} />
+                  </div>
+                ))}
+              </div>
+              <div style={{ display: "flex", gap: 10, marginTop: 20 }}>
+                <button onClick={() => updatePatient(p.id)} style={{ flex: 1, background: COLORS.accent, color: "#fff", border: "none", borderRadius: 8, padding: "10px", fontWeight: 700, cursor: "pointer" }}>Guardar cambios</button>
+                <button onClick={() => setShowEditForm(false)} style={{ flex: 1, background: COLORS.card, color: COLORS.textMuted, border: `1px solid ${COLORS.border}`, borderRadius: 8, padding: "10px", cursor: "pointer" }}>Cancelar</button>
+              </div>
+            </div>
+          </div>
+        )}
 
         <h3 style={{ color: COLORS.text, marginBottom: 12 }}>Citas</h3>
         {pAppts.length === 0 ? <div style={{ color: COLORS.textDim, marginBottom: 20 }}>Sin citas registradas</div> : (
