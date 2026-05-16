@@ -53,13 +53,24 @@ function WhatsAppBtn({ phone, message }) {
   );
 }
 
-function AgendaView({ appointments, patients, setAppointments, setView, setSelectedPatient }) {
-  const [selectedDate, setSelectedDate] = useState(today());
+function AgendaView({ appointments, patients, setAppointments, setView, setSelectedPatient, initialDate, initialFilter }) {
+  const [selectedDate, setSelectedDate] = useState(initialDate || today());
+  const [filterStatus, setFilterStatus] = useState(initialFilter || "");
   const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState({ patientId: "", date: today(), time: "09:00", duration: 60, treatment: "Limpieza dental", dentist: "Dr. Rodrigo Soto", notes: "", status: "pendiente" });
+  const [form, setForm] = useState({ patientId: "", date: initialDate || today(), time: "09:00", duration: 60, treatment: "Limpieza dental", dentist: "Dra. María Florencia Muñoz", notes: "", status: "pendiente" });
 
-  const dayAppts = appointments.filter(a => a.date === selectedDate).sort((a, b) => a.time.localeCompare(b.time));
+  // Mes visible en el calendario
+  const [calMonth, setCalMonth] = useState(() => {
+    const d = new Date(initialDate || today());
+    return { year: d.getFullYear(), month: d.getMonth() };
+  });
+
   const getPatient = (id) => patients.find(p => p.id === Number(id));
+
+  // Citas del día seleccionado (con filtro opcional de estado)
+  const dayAppts = appointments
+    .filter(a => a.date === selectedDate && (!filterStatus || a.status === filterStatus))
+    .sort((a, b) => a.time.localeCompare(b.time));
 
   const saveAppt = async () => {
     if (!form.patientId || !form.date || !form.time) return;
@@ -85,37 +96,79 @@ function AgendaView({ appointments, patients, setAppointments, setView, setSelec
     return `Hola ${p?.name?.split(" ")[0]} 👋, le recordamos su cita en *Clínica Estética y Dental Olimpia* para el día *${formatDate(appt.date)}* a las *${appt.time} hrs* para *${appt.treatment}*.\n\nPor favor confirme respondiendo *SÍ* o escríbanos si necesita reagendar.\n\n📍 Arturo Prat 350, Of. 506, Temuco`;
   };
 
-  const getWeekDays = () => {
-    const d = new Date(selectedDate);
-    const day = d.getDay();
-    const diff = d.getDate() - day + (day === 0 ? -6 : 1);
-    const monday = new Date(d.setDate(diff));
-    return Array.from({ length: 6 }, (_, i) => {
-      const dd = new Date(monday);
-      dd.setDate(monday.getDate() + i);
-      return dd.toISOString().split("T")[0];
-    });
+  // Generar días del mes para el calendario
+  const buildCalendar = () => {
+    const { year, month } = calMonth;
+    const firstDay = new Date(year, month, 1).getDay(); // 0=dom
+    const daysInMonth = new Date(year, month + 1, 0).getDate();
+    // Ajustar para que empiece lunes (0=lun)
+    const startOffset = (firstDay === 0 ? 6 : firstDay - 1);
+    const cells = [];
+    for (let i = 0; i < startOffset; i++) cells.push(null);
+    for (let d = 1; d <= daysInMonth; d++) {
+      const dateStr = `${year}-${String(month + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+      cells.push(dateStr);
+    }
+    return cells;
   };
-  const weekDays = getWeekDays();
-  const dayNames = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb"];
+
+  const calCells = buildCalendar();
+  const monthNames = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
+  const prevMonth = () => setCalMonth(m => m.month === 0 ? { year: m.year - 1, month: 11 } : { ...m, month: m.month - 1 });
+  const nextMonth = () => setCalMonth(m => m.month === 11 ? { year: m.year + 1, month: 0 } : { ...m, month: m.month + 1 });
+
+  const statusFilters = [
+    { value: "", label: "Todas" },
+    { value: "confirmada", label: "Confirmadas", color: COLORS.success },
+    { value: "pendiente", label: "Pendientes", color: COLORS.warning },
+    { value: "cancelada", label: "Canceladas", color: COLORS.danger },
+    { value: "completada", label: "Completadas", color: COLORS.textMuted },
+  ];
 
   return (
     <div>
-      <div style={{ display: "flex", gap: 8, marginBottom: 24, overflowX: "auto", paddingBottom: 4 }}>
-        {weekDays.map((d, i) => {
-          const count = appointments.filter(a => a.date === d).length;
-          const isToday = d === today();
-          const isSelected = d === selectedDate;
+      {/* Navegación de mes */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+        <button onClick={prevMonth} style={{ background: COLORS.card, border: `1px solid ${COLORS.border}`, borderRadius: 8, color: COLORS.text, cursor: "pointer", padding: "6px 12px", fontSize: 16 }}>‹</button>
+        <div style={{ color: COLORS.text, fontWeight: 700, fontSize: 16 }}>{monthNames[calMonth.month]} {calMonth.year}</div>
+        <button onClick={nextMonth} style={{ background: COLORS.card, border: `1px solid ${COLORS.border}`, borderRadius: 8, color: COLORS.text, cursor: "pointer", padding: "6px 12px", fontSize: 16 }}>›</button>
+      </div>
+
+      {/* Cabecera días semana */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 3, marginBottom: 3, textAlign: "center" }}>
+        {["Lun","Mar","Mié","Jue","Vie","Sáb","Dom"].map(d => (
+          <div key={d} style={{ color: COLORS.textDim, fontSize: 11, fontWeight: 600, padding: "4px 0" }}>{d}</div>
+        ))}
+      </div>
+
+      {/* Grid del mes */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 3, marginBottom: 20 }}>
+        {calCells.map((dateStr, i) => {
+          if (!dateStr) return <div key={i} />;
+          const count = appointments.filter(a => a.date === dateStr && (!filterStatus || a.status === filterStatus)).length;
+          const isToday = dateStr === today();
+          const isSelected = dateStr === selectedDate;
+          const isSunday = (i % 7) === 6;
           return (
-            <button key={d} onClick={() => setSelectedDate(d)} style={{ flex: "0 0 auto", minWidth: 72, padding: "10px 8px", borderRadius: 10, border: `1px solid ${isSelected ? COLORS.accent : COLORS.border}`, background: isSelected ? COLORS.accent + "22" : COLORS.card, color: isSelected ? COLORS.accent : COLORS.text, cursor: "pointer", textAlign: "center" }}>
-              <div style={{ fontSize: 11, color: isSelected ? COLORS.accent : COLORS.textMuted, marginBottom: 2 }}>{dayNames[i]}</div>
-              <div style={{ fontWeight: 700, fontSize: 18 }}>{d.split("-")[2]}</div>
-              {count > 0 && <div style={{ marginTop: 4, background: COLORS.accent, borderRadius: 10, fontSize: 10, padding: "1px 6px", color: "#fff", fontWeight: 700 }}>{count}</div>}
-              {isToday && <div style={{ fontSize: 9, color: COLORS.success, marginTop: 2 }}>HOY</div>}
+            <button key={dateStr} onClick={() => setSelectedDate(dateStr)}
+              style={{ padding: "6px 2px", borderRadius: 8, border: `1px solid ${isSelected ? COLORS.accent : isToday ? COLORS.accent + "55" : COLORS.border}`, background: isSelected ? COLORS.accent : isToday ? COLORS.accent + "11" : COLORS.card, color: isSelected ? "#fff" : isSunday ? COLORS.danger : COLORS.text, cursor: "pointer", textAlign: "center", minHeight: 48 }}>
+              <div style={{ fontWeight: isToday || isSelected ? 700 : 400, fontSize: 14 }}>{dateStr.split("-")[2]}</div>
+              {count > 0 && (
+                <div style={{ marginTop: 3, background: isSelected ? "#ffffff44" : COLORS.accent, borderRadius: 8, fontSize: 10, padding: "1px 4px", color: "#fff", fontWeight: 700, display: "inline-block" }}>{count}</div>
+              )}
             </button>
           );
         })}
-        <button onClick={() => setShowForm(true)} style={{ flex: "0 0 auto", minWidth: 72, padding: "10px 8px", borderRadius: 10, border: `1px dashed ${COLORS.accent}`, background: "transparent", color: COLORS.accent, cursor: "pointer", fontSize: 22 }}>+</button>
+      </div>
+
+      {/* Filtros de estado */}
+      <div style={{ display: "flex", gap: 6, marginBottom: 14, flexWrap: "wrap" }}>
+        {statusFilters.map(f => (
+          <button key={f.value} onClick={() => setFilterStatus(f.value)}
+            style={{ padding: "4px 12px", borderRadius: 20, border: `1px solid ${filterStatus === f.value ? (f.color || COLORS.accent) : COLORS.border}`, background: filterStatus === f.value ? (f.color || COLORS.accent) + "22" : "transparent", color: filterStatus === f.value ? (f.color || COLORS.accent) : COLORS.textMuted, cursor: "pointer", fontSize: 12, fontWeight: 600 }}>
+            {f.label}
+          </button>
+        ))}
       </div>
 
       <div style={{ marginBottom: 16, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -572,7 +625,7 @@ function TreatmentsView({ treatments, setTreatments, patients }) {
   );
 }
 
-function DashboardView({ appointments, treatments, patients, setView }) {
+function DashboardView({ appointments, treatments, patients, setView, setAgendaConfig }) {
   const todayAppts = appointments.filter(a => a.date === today());
   const pending = appointments.filter(a => a.status === "pendiente").length;
   const confirmed = appointments.filter(a => a.status === "confirmada").length;
@@ -580,21 +633,30 @@ function DashboardView({ appointments, treatments, patients, setView }) {
   const thisMonth = new Date().toISOString().slice(0, 7);
   const monthRevenue = treatments.filter(t => t.date.startsWith(thisMonth)).reduce((s, t) => s + t.paid, 0);
 
+  const goAgenda = (filter = "", date = today()) => {
+    setAgendaConfig({ filter, date });
+    setView("agenda");
+  };
+
   return (
     <div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 12, marginBottom: 24 }}>
         {[
-          { label: "Citas hoy", value: todayAppts.length, color: COLORS.accent, icon: "📅" },
-          { label: "Confirmadas", value: confirmed, color: COLORS.success, icon: "✅" },
-          { label: "Pendientes", value: pending, color: COLORS.warning, icon: "⏳" },
-          { label: "Pacientes", value: patients.length, color: COLORS.accent, icon: "👥" },
-          { label: "Ingreso mes", value: formatCLP(monthRevenue), color: COLORS.success, icon: "💰", small: true },
-          { label: "Por cobrar", value: formatCLP(totalDebt), color: COLORS.danger, icon: "💸", small: true },
+          { label: "Citas hoy", value: todayAppts.length, color: COLORS.accent, icon: "📅", action: () => goAgenda("", today()) },
+          { label: "Confirmadas", value: confirmed, color: COLORS.success, icon: "✅", action: () => goAgenda("confirmada") },
+          { label: "Pendientes", value: pending, color: COLORS.warning, icon: "⏳", action: () => goAgenda("pendiente") },
+          { label: "Pacientes", value: patients.length, color: COLORS.accent, icon: "👥", action: () => setView("patients") },
+          { label: "Ingreso mes", value: formatCLP(monthRevenue), color: COLORS.success, icon: "💰", small: true, action: () => setView("treatments") },
+          { label: "Por cobrar", value: formatCLP(totalDebt), color: COLORS.danger, icon: "💸", small: true, action: () => setView("treatments") },
         ].map(card => (
-          <div key={card.label} style={{ background: COLORS.card, border: `1px solid ${card.color}33`, borderRadius: 12, padding: "16px 14px" }}>
+          <div key={card.label} onClick={card.action}
+            style={{ background: COLORS.card, border: `1px solid ${card.color}33`, borderRadius: 12, padding: "16px 14px", cursor: "pointer", transition: "border-color 0.2s" }}
+            onMouseEnter={e => e.currentTarget.style.borderColor = card.color + "88"}
+            onMouseLeave={e => e.currentTarget.style.borderColor = card.color + "33"}>
             <div style={{ fontSize: 22, marginBottom: 6 }}>{card.icon}</div>
             <div style={{ color: card.color, fontWeight: 700, fontSize: card.small ? 16 : 28 }}>{card.value}</div>
             <div style={{ color: COLORS.textMuted, fontSize: 12, marginTop: 2 }}>{card.label}</div>
+            <div style={{ color: card.color, fontSize: 10, marginTop: 4, opacity: 0.7 }}>Ver →</div>
           </div>
         ))}
       </div>
@@ -744,6 +806,7 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [session, setSession] = useState(null);
   const [copied, setCopied] = useState(false);
+  const [agendaConfig, setAgendaConfig] = useState({ filter: "", date: today() });
 
   const shareLink = `${window.location.origin}${window.location.pathname}registro/`;
   const copyLink = () => {
@@ -875,8 +938,8 @@ export default function App() {
       </div>
 
       <div style={{ padding: "20px 16px", maxWidth: 700, margin: "0 auto", paddingBottom: 90 }}>
-        {view === "dashboard" && <DashboardView appointments={appointments} treatments={treatments} patients={patients} setView={setView} />}
-        {view === "agenda" && <AgendaView appointments={appointments} patients={patients} setAppointments={setAppointments} setView={setView} setSelectedPatient={setSelectedPatient} />}
+        {view === "dashboard" && <DashboardView appointments={appointments} treatments={treatments} patients={patients} setView={setView} setAgendaConfig={setAgendaConfig} />}
+        {view === "agenda" && <AgendaView key={agendaConfig.date + agendaConfig.filter} appointments={appointments} patients={patients} setAppointments={setAppointments} setView={setView} setSelectedPatient={setSelectedPatient} initialDate={agendaConfig.date} initialFilter={agendaConfig.filter} />}
         {view === "patients" && <PatientsView patients={patients} setPatients={setPatients} appointments={appointments} treatments={treatments} selectedPatient={selectedPatient} setSelectedPatient={setSelectedPatient} />}
         {view === "treatments" && <TreatmentsView treatments={treatments} setTreatments={setTreatments} patients={patients} />}
       </div>
