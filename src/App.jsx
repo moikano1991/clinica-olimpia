@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { supabase } from "./supabase";
+import * as XLSX from "xlsx";
 
 const COLORS = {
   bg: "#0a0f1e",
@@ -783,6 +784,62 @@ export default function App() {
     setPatients([]); setAppointments([]); setTreatments([]);
   };
 
+  const exportarExcel = () => {
+    const wb = XLSX.utils.book_new();
+
+    // Hoja 1: Pacientes
+    const pacientesData = patients.map(p => ({
+      "Nombre": p.name,
+      "RUT": p.rut || "",
+      "Teléfono": p.phone || "",
+      "Email": p.email || "",
+      "Fecha Nacimiento": p.dob ? formatDate(p.dob) : "",
+      "Dirección": p.address || "",
+      "Alertas/Alergias": p.notes || "",
+      "Fecha Registro": p.created_at ? new Date(p.created_at).toLocaleDateString("es-CL") : "",
+    }));
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(pacientesData), "Pacientes");
+
+    // Hoja 2: Citas
+    const citasData = appointments.map(a => {
+      const p = patients.find(pt => pt.id === a.patientId);
+      return {
+        "Fecha": formatDate(a.date),
+        "Hora": a.time,
+        "Paciente": p?.name || "",
+        "RUT": p?.rut || "",
+        "Teléfono": p?.phone || "",
+        "Tratamiento": a.treatment,
+        "Dentista": a.dentist || "",
+        "Estado": a.status,
+        "Duración (min)": a.duration || 60,
+        "Notas": a.notes || "",
+      };
+    });
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(citasData), "Citas");
+
+    // Hoja 3: Historial Clínico
+    const clinicaData = treatments.map(t => {
+      const p = patients.find(pt => pt.id === t.patientId);
+      return {
+        "Fecha": formatDate(t.date),
+        "Paciente": p?.name || "",
+        "RUT": p?.rut || "",
+        "Procedimiento": t.procedure || "",
+        "Pieza Dental": t.tooth || "",
+        "Costo": t.cost || 0,
+        "Pagado": t.paid || 0,
+        "Saldo": (t.cost || 0) - (t.paid || 0),
+        "Estado": t.status || "",
+        "Notas": t.notes || "",
+      };
+    });
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(clinicaData), "Historial Clínico");
+
+    const fecha = new Date().toISOString().split("T")[0];
+    XLSX.writeFile(wb, `Clinica_Olimpia_${fecha}.xlsx`);
+  };
+
   const tabs = [
     { id: "dashboard", label: "Inicio", icon: "🏠" },
     { id: "agenda", label: "Agenda", icon: "📅" },
@@ -806,7 +863,10 @@ export default function App() {
           <div style={{ fontWeight: 800, fontSize: 16, color: COLORS.text, letterSpacing: -0.5 }}>🦷 Clínica Olimpia</div>
           <div style={{ fontSize: 11, color: COLORS.textDim }}>Arturo Prat 350, Of. 506 · Temuco</div>
         </div>
-        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+          <button onClick={exportarExcel} style={{ background: "#10b98122", color: COLORS.success, border: `1px solid #10b98144`, borderRadius: 6, cursor: "pointer", fontSize: 11, padding: "4px 10px", fontWeight: 600 }}>
+            📥 Exportar Excel
+          </button>
           <button onClick={copyLink} style={{ background: copied ? COLORS.success + "22" : COLORS.accent + "22", color: copied ? COLORS.success : COLORS.accent, border: `1px solid ${copied ? COLORS.success : COLORS.accent}44`, borderRadius: 6, cursor: "pointer", fontSize: 11, padding: "4px 10px", fontWeight: 600 }}>
             {copied ? "✓ Copiado" : "🔗 Compartir registro"}
           </button>
