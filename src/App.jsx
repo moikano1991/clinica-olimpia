@@ -560,6 +560,69 @@ const inputStyle = {
   borderRadius: 8, padding: "9px 12px", color: COLORS.text, fontSize: 14, outline: "none",
 };
 
+function RegistroView() {
+  const [form, setForm] = useState({ name: "", rut: "", phone: "", email: "", dob: "", address: "", notes: "" });
+  const [sent, setSent] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (!form.name || !form.rut || !form.phone) { setError("Nombre, RUT y teléfono son obligatorios."); return; }
+    setLoading(true);
+    setError("");
+    const { error } = await supabase.from("patients").insert([{
+      name: form.name, rut: form.rut, phone: form.phone,
+      email: form.email, dob: form.dob, address: form.address, notes: form.notes,
+    }]);
+    if (error) { setError("Error al guardar. Intenta nuevamente."); setLoading(false); }
+    else setSent(true);
+  };
+
+  if (sent) return (
+    <div style={{ minHeight: "100vh", background: COLORS.bg, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+      <div style={{ background: COLORS.surface, border: `1px solid ${COLORS.border}`, borderRadius: 20, padding: 40, width: "100%", maxWidth: 420, textAlign: "center" }}>
+        <div style={{ fontSize: 56, marginBottom: 16 }}>✅</div>
+        <h2 style={{ color: COLORS.text, margin: "0 0 10px" }}>¡Datos recibidos!</h2>
+        <p style={{ color: COLORS.textMuted, fontSize: 14, margin: 0 }}>Gracias {form.name.split(" ")[0]}, tus datos fueron registrados correctamente en Clínica Olimpia. Te contactaremos pronto.</p>
+        <div style={{ marginTop: 24, color: COLORS.textDim, fontSize: 12 }}>🦷 Clínica Estética y Dental Olimpia · Arturo Prat 350, Of. 506, Temuco</div>
+      </div>
+    </div>
+  );
+
+  return (
+    <div style={{ minHeight: "100vh", background: COLORS.bg, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+      <div style={{ background: COLORS.surface, border: `1px solid ${COLORS.border}`, borderRadius: 20, padding: 32, width: "100%", maxWidth: 480 }}>
+        <div style={{ textAlign: "center", marginBottom: 24 }}>
+          <div style={{ fontSize: 42, marginBottom: 8 }}>🦷</div>
+          <div style={{ fontWeight: 800, fontSize: 20, color: COLORS.text }}>Registro de Paciente</div>
+          <div style={{ fontSize: 12, color: COLORS.textDim, marginTop: 4 }}>Clínica Estética y Dental Olimpia · Temuco</div>
+        </div>
+        <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          {[
+            { label: "Nombre completo *", key: "name", type: "text", placeholder: "Ej: Juan Pérez González" },
+            { label: "RUT *", key: "rut", type: "text", placeholder: "Ej: 12.345.678-9" },
+            { label: "Teléfono *", key: "phone", type: "text", placeholder: "Ej: 56912345678" },
+            { label: "Email", key: "email", type: "email", placeholder: "correo@ejemplo.com" },
+            { label: "Fecha de nacimiento", key: "dob", type: "date" },
+            { label: "Dirección", key: "address", type: "text", placeholder: "Calle y número" },
+            { label: "Alergias o condiciones importantes", key: "notes", type: "text", placeholder: "Ej: Alérgico a penicilina" },
+          ].map(f => (
+            <div key={f.key}>
+              <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>{f.label}</label>
+              <input type={f.type} value={form[f.key]} onChange={e => setForm(p => ({ ...p, [f.key]: e.target.value }))} placeholder={f.placeholder || ""} style={inputStyle} />
+            </div>
+          ))}
+          {error && <div style={{ color: COLORS.danger, fontSize: 13, textAlign: "center" }}>{error}</div>}
+          <button type="submit" disabled={loading} style={{ background: COLORS.accent, color: "#fff", border: "none", borderRadius: 8, padding: "12px", fontWeight: 700, cursor: "pointer", fontSize: 15, marginTop: 4 }}>
+            {loading ? "Guardando..." : "Enviar mis datos"}
+          </button>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 function LoginView({ onLogin }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -603,6 +666,9 @@ function LoginView({ onLogin }) {
 }
 
 export default function App() {
+  // Mostrar formulario público si la URL tiene #registro
+  if (window.location.hash === "#registro") return <RegistroView />;
+
   const [view, setView] = useState("dashboard");
   const [patients, setPatients] = useState([]);
   const [appointments, setAppointments] = useState([]);
@@ -610,6 +676,14 @@ export default function App() {
   const [selectedPatient, setSelectedPatient] = useState(null);
   const [loading, setLoading] = useState(true);
   const [session, setSession] = useState(null);
+  const [copied, setCopied] = useState(false);
+
+  const shareLink = `${window.location.origin}${window.location.pathname}#registro`;
+  const copyLink = () => {
+    navigator.clipboard.writeText(shareLink);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -666,7 +740,12 @@ export default function App() {
           <div style={{ fontWeight: 800, fontSize: 16, color: COLORS.text, letterSpacing: -0.5 }}>🦷 Clínica Olimpia</div>
           <div style={{ fontSize: 11, color: COLORS.textDim }}>Arturo Prat 350, Of. 506 · Temuco</div>
         </div>
-        <button onClick={handleLogout} style={{ background: "none", border: `1px solid ${COLORS.border}`, borderRadius: 6, color: COLORS.textMuted, cursor: "pointer", fontSize: 11, padding: "4px 10px" }}>Salir</button>
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <button onClick={copyLink} style={{ background: copied ? COLORS.success + "22" : COLORS.accent + "22", color: copied ? COLORS.success : COLORS.accent, border: `1px solid ${copied ? COLORS.success : COLORS.accent}44`, borderRadius: 6, cursor: "pointer", fontSize: 11, padding: "4px 10px", fontWeight: 600 }}>
+            {copied ? "✓ Copiado" : "🔗 Compartir registro"}
+          </button>
+          <button onClick={handleLogout} style={{ background: "none", border: `1px solid ${COLORS.border}`, borderRadius: 6, color: COLORS.textMuted, cursor: "pointer", fontSize: 11, padding: "4px 10px" }}>Salir</button>
+        </div>
       </div>
 
       <div style={{ padding: "20px 16px", maxWidth: 700, margin: "0 auto", paddingBottom: 90 }}>
