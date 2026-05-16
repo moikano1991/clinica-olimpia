@@ -213,7 +213,16 @@ function PatientsView({ patients, setPatients, appointments, treatments, selecte
 
   useEffect(() => { if (selectedPatient) setDetail(selectedPatient); }, [selectedPatient]);
 
-  const filtered = patients.filter(p => p.name.toLowerCase().includes(search.toLowerCase()) || p.rut.includes(search) || p.phone.includes(search));
+  const normalizeRut = (r) => (r || "").replace(/[.\-]/g, "").toLowerCase();
+  const filtered = patients.filter(p => {
+    const q = search.toLowerCase();
+    return (
+      p.name.toLowerCase().includes(q) ||
+      normalizeRut(p.rut).includes(normalizeRut(search)) ||
+      (p.phone || "").includes(q) ||
+      (p.email || "").toLowerCase().includes(q)
+    );
+  });
 
   const savePatient = async () => {
     if (!form.name) return;
@@ -372,12 +381,30 @@ function PatientsView({ patients, setPatients, appointments, treatments, selecte
 
   return (
     <div>
-      <div style={{ display: "flex", gap: 10, marginBottom: 20 }}>
-        <input placeholder="Buscar por nombre, RUT o teléfono..." value={search} onChange={e => setSearch(e.target.value)} style={{ ...inputStyle, flex: 1 }} />
+      <div style={{ display: "flex", gap: 10, marginBottom: 8 }}>
+        <div style={{ position: "relative", flex: 1 }}>
+          <span style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", color: COLORS.textDim, fontSize: 16 }}>🔍</span>
+          <input
+            placeholder="Buscar por nombre, RUT o teléfono..."
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            style={{ ...inputStyle, paddingLeft: 38, width: "100%" }}
+          />
+          {search && (
+            <button onClick={() => setSearch("")} style={{ position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)", background: "none", border: "none", color: COLORS.textDim, cursor: "pointer", fontSize: 18, lineHeight: 1 }}>×</button>
+          )}
+        </div>
         <button onClick={() => setShowForm(true)} style={{ background: COLORS.accent, color: "#fff", border: "none", borderRadius: 8, padding: "8px 18px", fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap" }}>+ Paciente</button>
       </div>
 
+      <div style={{ color: COLORS.textDim, fontSize: 12, marginBottom: 14 }}>
+        {search ? `${filtered.length} resultado${filtered.length !== 1 ? "s" : ""} para "${search}"` : `${patients.length} paciente${patients.length !== 1 ? "s" : ""} en total`}
+      </div>
+
       <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        {filtered.length === 0 && search && (
+          <div style={{ textAlign: "center", color: COLORS.textDim, padding: 40 }}>No se encontró ningún paciente con "{search}"</div>
+        )}
         {filtered.map(p => (
           <div key={p.id} onClick={() => setDetail(p.id)} style={{ background: COLORS.card, border: `1px solid ${COLORS.border}`, borderRadius: 12, padding: "14px 18px", cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             <div>
