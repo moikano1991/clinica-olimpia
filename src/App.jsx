@@ -228,6 +228,32 @@ function PatientsView({ patients, setPatients, appointments, treatments, selecte
     }
   };
 
+  const parseWhatsApp = (text) => {
+    const rut = text.match(/\b\d{1,2}\.?\d{3}\.?\d{3}-?[\dkK]\b/)?.[0] || "";
+    const email = text.match(/[\w.-]+@[\w.-]+\.\w+/)?.[0] || "";
+    const phone = text.match(/(?:56\s?)?(?:9\s?\d{4}\s?\d{4}|\d{8,9})/)?.[0]?.replace(/\s/g, "") || "";
+    const fullPhone = phone && !phone.startsWith("56") ? "56" + phone.replace(/^0/, "") : phone;
+    const dob = text.match(/\b(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4})\b/);
+    const dobFormatted = dob ? `${dob[3]}-${dob[2].padStart(2,"0")}-${dob[1].padStart(2,"0")}` : "";
+    // Extraer nombre: líneas sin números que parezcan nombre
+    const lines = text.split(/\n|,/).map(l => l.trim()).filter(Boolean);
+    const nameLine = lines.find(l => /^[A-ZÁÉÍÓÚÑ][a-záéíóúñ]+(?: [A-ZÁÉÍÓÚÑ][a-záéíóúñ]+)+$/.test(l)) || "";
+    // Buscar dirección: línea con calle, av, pasaje, etc.
+    const addressLine = lines.find(l => /(?:calle|av\.|avenida|pasaje|villa|pje|sector|block|bl\.|#|\d+.*temuco|temuco)/i.test(l)) || "";
+    // Notas: buscar alergias o condiciones
+    const notesLine = lines.find(l => /(?:alérgic|alergic|diabét|hipert|medicament|no puede|toma)/i.test(l)) || "";
+    setForm(f => ({
+      ...f,
+      name: nameLine || f.name,
+      rut: rut || f.rut,
+      phone: fullPhone || f.phone,
+      email: email || f.email,
+      dob: dobFormatted || f.dob,
+      address: addressLine || f.address,
+      notes: notesLine || f.notes,
+    }));
+  };
+
   const updatePatient = async (id) => {
     if (!editForm.name) return;
     const { data, error } = await supabase.from("patients").update({
@@ -370,7 +396,20 @@ function PatientsView({ patients, setPatients, appointments, treatments, selecte
       {showForm && (
         <div style={{ position: "fixed", inset: 0, background: "#00000088", zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
           <div style={{ background: COLORS.surface, border: `1px solid ${COLORS.border}`, borderRadius: 16, padding: 28, width: "100%", maxWidth: 480, maxHeight: "90vh", overflowY: "auto" }}>
-            <h3 style={{ color: COLORS.text, margin: "0 0 20px" }}>Nuevo Paciente</h3>
+            <h3 style={{ color: COLORS.text, margin: "0 0 16px" }}>Nuevo Paciente</h3>
+
+            {/* Pegar desde WhatsApp */}
+            <div style={{ background: "#25D36611", border: "1px dashed #25D36644", borderRadius: 10, padding: 12, marginBottom: 18 }}>
+              <div style={{ color: "#25D366", fontSize: 12, fontWeight: 700, marginBottom: 6 }}>📋 Pegar texto de WhatsApp</div>
+              <textarea
+                placeholder={"Pega aquí el mensaje del paciente...\nEj: Hola, soy María González, RUT 12.345.678-9, teléfono 56912345678, vivo en Los Robles 123 Temuco"}
+                onPaste={e => { setTimeout(() => parseWhatsApp(e.target.value), 50); }}
+                onChange={e => parseWhatsApp(e.target.value)}
+                style={{ ...inputStyle, height: 80, resize: "vertical", fontSize: 12, color: COLORS.textMuted }}
+              />
+              <div style={{ color: COLORS.textDim, fontSize: 11, marginTop: 4 }}>Los datos se rellenan automáticamente abajo. Revisa y corrige si es necesario.</div>
+            </div>
+
             <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
               {[
                 { label: "Nombre completo *", key: "name", type: "text" },
@@ -383,13 +422,13 @@ function PatientsView({ patients, setPatients, appointments, treatments, selecte
               ].map(f => (
                 <div key={f.key}>
                   <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>{f.label}</label>
-                  <input type={f.type} value={form[f.key]} onChange={e => setForm(p => ({ ...p, [f.key]: e.target.value }))} style={inputStyle} />
+                  <input type={f.type} value={form[f.key]} onChange={e => setForm(p => ({ ...p, [f.key]: e.target.value }))} style={{ ...inputStyle, borderColor: form[f.key] ? COLORS.accent + "66" : COLORS.border }} />
                 </div>
               ))}
             </div>
             <div style={{ display: "flex", gap: 10, marginTop: 20 }}>
               <button onClick={savePatient} style={{ flex: 1, background: COLORS.accent, color: "#fff", border: "none", borderRadius: 8, padding: "10px", fontWeight: 700, cursor: "pointer" }}>Guardar</button>
-              <button onClick={() => setShowForm(false)} style={{ flex: 1, background: COLORS.card, color: COLORS.textMuted, border: `1px solid ${COLORS.border}`, borderRadius: 8, padding: "10px", cursor: "pointer" }}>Cancelar</button>
+              <button onClick={() => { setShowForm(false); setForm({ name: "", rut: "", phone: "", email: "", dob: "", address: "", notes: "" }); }} style={{ flex: 1, background: COLORS.card, color: COLORS.textMuted, border: `1px solid ${COLORS.border}`, borderRadius: 8, padding: "10px", cursor: "pointer" }}>Cancelar</button>
             </div>
           </div>
         </div>
