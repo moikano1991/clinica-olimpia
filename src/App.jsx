@@ -453,6 +453,10 @@ function PatientsView({ patients, setPatients, appointments, treatments, selecte
           )}
         </div>
         <button onClick={() => setShowForm(true)} style={{ background: COLORS.accent, color: "#fff", border: "none", borderRadius: 8, padding: "8px 18px", fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap" }}>+ Paciente</button>
+        <button onClick={() => { setShowForm(true); setTimeout(() => document.getElementById("wa-paste-area")?.focus(), 200); }}
+          style={{ background: "#25D36622", color: "#16a34a", border: "1.5px solid #86efac", borderRadius: 8, padding: "8px 14px", fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap", fontSize: 13 }}>
+          📋 Pegar WhatsApp
+        </button>
       </div>
 
       <div style={{ color: COLORS.textDim, fontSize: 12, marginBottom: 14 }}>
@@ -487,6 +491,7 @@ function PatientsView({ patients, setPatients, appointments, treatments, selecte
             <div style={{ background: "#25D36611", border: "1px dashed #25D36644", borderRadius: 10, padding: 12, marginBottom: 18 }}>
               <div style={{ color: "#25D366", fontSize: 12, fontWeight: 700, marginBottom: 6 }}>📋 Pegar texto de WhatsApp</div>
               <textarea
+                id="wa-paste-area"
                 placeholder={"Pega aquí el mensaje del paciente...\nEj: Hola, soy María González, RUT 12.345.678-9, teléfono 56912345678, vivo en Los Robles 123 Temuco"}
                 onPaste={e => { setTimeout(() => parseWhatsApp(e.target.value), 50); }}
                 onChange={e => parseWhatsApp(e.target.value)}
@@ -993,8 +998,16 @@ export default function App() {
             </div>
             <div style={{ fontSize: 12, color: COLORS.textMuted }}>Arturo Prat 350, Of. 506 · Temuco</div>
           </div>
-          <div style={{ fontSize: 12, color: COLORS.textMuted, background: COLORS.bg, padding: "6px 14px", borderRadius: 20, border: `1px solid ${COLORS.border}` }}>
-            {new Date().toLocaleDateString("es-CL", { weekday: "long", day: "numeric", month: "long" })}
+          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+            <div style={{ fontSize: 12, color: COLORS.textMuted, background: COLORS.bg, padding: "6px 14px", borderRadius: 20, border: `1px solid ${COLORS.border}` }}>
+              {new Date().toLocaleDateString("es-CL", { weekday: "long", day: "numeric", month: "long" })}
+            </div>
+            <button onClick={exportarExcel} style={{ display: "flex", alignItems: "center", gap: 6, background: "#f0fdf4", color: COLORS.success, border: `1.5px solid #86efac`, borderRadius: 8, cursor: "pointer", fontSize: 12, padding: "6px 14px", fontWeight: 700 }}>
+              📥 Exportar Excel
+            </button>
+            <button onClick={copyLink} style={{ display: "flex", alignItems: "center", gap: 6, background: copied ? "#f0fdf4" : "#eff6ff", color: copied ? COLORS.success : COLORS.accent, border: `1.5px solid ${copied ? "#86efac" : "#93c5fd"}`, borderRadius: 8, cursor: "pointer", fontSize: 12, padding: "6px 14px", fontWeight: 700 }}>
+              {copied ? "✓ Copiado" : "🔗 Registro paciente"}
+            </button>
           </div>
         </header>
 
