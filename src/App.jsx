@@ -3,18 +3,22 @@ import { supabase } from "./supabase";
 import * as XLSX from "xlsx";
 
 const COLORS = {
-  bg: "#0a0f1e",
-  surface: "#111827",
-  card: "#1a2235",
-  border: "#1e3a5f",
-  accent: "#0ea5e9",
-  accentDim: "#0369a1",
-  success: "#10b981",
-  warning: "#f59e0b",
-  danger: "#ef4444",
-  text: "#f1f5f9",
-  textMuted: "#94a3b8",
-  textDim: "#475569",
+  bg: "#f0f4f8",
+  surface: "#ffffff",
+  card: "#ffffff",
+  border: "#e2e8f0",
+  sidebar: "#1e3a6e",
+  sidebarHover: "#2a4f96",
+  sidebarActive: "#3b82f6",
+  sidebarText: "#bfdbfe",
+  accent: "#2563eb",
+  accentDim: "#1d4ed8",
+  success: "#059669",
+  warning: "#d97706",
+  danger: "#dc2626",
+  text: "#1e293b",
+  textMuted: "#64748b",
+  textDim: "#94a3b8",
 };
 
 const toAppt = (r) => ({ ...r, patientId: r.patient_id });
@@ -28,16 +32,16 @@ const today = () => new Date().toISOString().split("T")[0];
 
 function StatusBadge({ status }) {
   const map = {
-    confirmada: { color: COLORS.success, label: "Confirmada" },
-    pendiente: { color: COLORS.warning, label: "Pendiente" },
-    cancelada: { color: COLORS.danger, label: "Cancelada" },
-    completada: { color: COLORS.textDim, label: "Completada" },
-    "pendiente pago": { color: COLORS.warning, label: "Pend. Pago" },
-    completado: { color: COLORS.success, label: "Completado" },
+    confirmada: { color: "#065f46", bg: "#d1fae5", label: "Confirmada" },
+    pendiente: { color: "#92400e", bg: "#fef3c7", label: "Pendiente" },
+    cancelada: { color: "#991b1b", bg: "#fee2e2", label: "Cancelada" },
+    completada: { color: "#374151", bg: "#f3f4f6", label: "Completada" },
+    "pendiente pago": { color: "#92400e", bg: "#fef3c7", label: "Pend. Pago" },
+    completado: { color: "#065f46", bg: "#d1fae5", label: "Completado" },
   };
-  const s = map[status] || { color: COLORS.textMuted, label: status };
+  const s = map[status] || { color: COLORS.textMuted, bg: COLORS.bg, label: status };
   return (
-    <span style={{ background: s.color + "22", color: s.color, border: `1px solid ${s.color}44`, borderRadius: 6, padding: "2px 10px", fontSize: 12, fontWeight: 600 }}>
+    <span style={{ background: s.bg, color: s.color, borderRadius: 20, padding: "3px 12px", fontSize: 12, fontWeight: 600 }}>
       {s.label}
     </span>
   );
@@ -642,21 +646,21 @@ function DashboardView({ appointments, treatments, patients, setView, setAgendaC
     <div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 12, marginBottom: 24 }}>
         {[
-          { label: "Citas hoy", value: todayAppts.length, color: COLORS.accent, icon: "📅", action: () => goAgenda("", today()) },
-          { label: "Confirmadas", value: confirmed, color: COLORS.success, icon: "✅", action: () => goAgenda("confirmada") },
-          { label: "Pendientes", value: pending, color: COLORS.warning, icon: "⏳", action: () => goAgenda("pendiente") },
-          { label: "Pacientes", value: patients.length, color: COLORS.accent, icon: "👥", action: () => setView("patients") },
-          { label: "Ingreso mes", value: formatCLP(monthRevenue), color: COLORS.success, icon: "💰", small: true, action: () => setView("treatments") },
-          { label: "Por cobrar", value: formatCLP(totalDebt), color: COLORS.danger, icon: "💸", small: true, action: () => setView("treatments") },
+          { label: "Citas hoy", value: todayAppts.length, color: COLORS.accent, bg: "#eff6ff", icon: "📅", action: () => goAgenda("", today()) },
+          { label: "Confirmadas", value: confirmed, color: COLORS.success, bg: "#f0fdf4", icon: "✅", action: () => goAgenda("confirmada") },
+          { label: "Pendientes", value: pending, color: COLORS.warning, bg: "#fffbeb", icon: "⏳", action: () => goAgenda("pendiente") },
+          { label: "Pacientes", value: patients.length, color: "#7c3aed", bg: "#f5f3ff", icon: "👥", action: () => setView("patients") },
+          { label: "Ingreso mes", value: formatCLP(monthRevenue), color: COLORS.success, bg: "#f0fdf4", icon: "💰", small: true, action: () => setView("treatments") },
+          { label: "Por cobrar", value: formatCLP(totalDebt), color: COLORS.danger, bg: "#fff1f2", icon: "💸", small: true, action: () => setView("treatments") },
         ].map(card => (
           <div key={card.label} onClick={card.action}
-            style={{ background: COLORS.card, border: `1px solid ${card.color}33`, borderRadius: 12, padding: "16px 14px", cursor: "pointer", transition: "border-color 0.2s" }}
-            onMouseEnter={e => e.currentTarget.style.borderColor = card.color + "88"}
-            onMouseLeave={e => e.currentTarget.style.borderColor = card.color + "33"}>
-            <div style={{ fontSize: 22, marginBottom: 6 }}>{card.icon}</div>
-            <div style={{ color: card.color, fontWeight: 700, fontSize: card.small ? 16 : 28 }}>{card.value}</div>
-            <div style={{ color: COLORS.textMuted, fontSize: 12, marginTop: 2 }}>{card.label}</div>
-            <div style={{ color: card.color, fontSize: 10, marginTop: 4, opacity: 0.7 }}>Ver →</div>
+            style={{ background: COLORS.card, borderRadius: 14, padding: "20px 18px", cursor: "pointer", boxShadow: "0 1px 4px rgba(0,0,0,0.07)", border: `1px solid ${COLORS.border}`, transition: "box-shadow 0.2s, transform 0.15s" }}
+            onMouseEnter={e => { e.currentTarget.style.boxShadow = "0 4px 16px rgba(0,0,0,0.12)"; e.currentTarget.style.transform = "translateY(-2px)"; }}
+            onMouseLeave={e => { e.currentTarget.style.boxShadow = "0 1px 4px rgba(0,0,0,0.07)"; e.currentTarget.style.transform = "translateY(0)"; }}>
+            <div style={{ width: 42, height: 42, borderRadius: 10, background: card.bg, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22, marginBottom: 14 }}>{card.icon}</div>
+            <div style={{ color: COLORS.text, fontWeight: 800, fontSize: card.small ? 18 : 32, lineHeight: 1 }}>{card.value}</div>
+            <div style={{ color: COLORS.textMuted, fontSize: 13, marginTop: 6 }}>{card.label}</div>
+            <div style={{ color: card.color, fontSize: 11, marginTop: 8, fontWeight: 600 }}>Ver detalle →</div>
           </div>
         ))}
       </div>
@@ -685,7 +689,7 @@ function DashboardView({ appointments, treatments, patients, setView, setAgendaC
 }
 
 const inputStyle = {
-  width: "100%", boxSizing: "border-box", background: "#0d1b2a", border: `1px solid ${COLORS.border}`,
+  width: "100%", boxSizing: "border-box", background: "#f8fafc", border: `1.5px solid ${COLORS.border}`,
   borderRadius: 8, padding: "9px 12px", color: COLORS.text, fontSize: 14, outline: "none",
 };
 
@@ -768,24 +772,24 @@ function LoginView({ onLogin }) {
   };
 
   return (
-    <div style={{ minHeight: "100vh", background: COLORS.bg, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
-      <div style={{ background: COLORS.surface, border: `1px solid ${COLORS.border}`, borderRadius: 20, padding: 36, width: "100%", maxWidth: 380 }}>
-        <div style={{ textAlign: "center", marginBottom: 28 }}>
-          <div style={{ fontSize: 48, marginBottom: 10 }}>🦷</div>
-          <div style={{ fontWeight: 800, fontSize: 20, color: COLORS.text }}>Clínica Olimpia</div>
-          <div style={{ fontSize: 12, color: COLORS.textDim, marginTop: 4 }}>Arturo Prat 350, Of. 506 · Temuco</div>
+    <div style={{ minHeight: "100vh", background: COLORS.sidebar, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+      <div style={{ background: "#fff", borderRadius: 20, padding: "40px 36px", width: "100%", maxWidth: 380, boxShadow: "0 20px 60px rgba(0,0,0,0.3)" }}>
+        <div style={{ textAlign: "center", marginBottom: 32 }}>
+          <div style={{ width: 64, height: 64, background: COLORS.accent, borderRadius: 16, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 32, margin: "0 auto 16px" }}>🦷</div>
+          <div style={{ fontWeight: 800, fontSize: 22, color: COLORS.text }}>Clínica Olimpia</div>
+          <div style={{ fontSize: 13, color: COLORS.textMuted, marginTop: 4 }}>Arturo Prat 350, Of. 506 · Temuco</div>
         </div>
-        <form onSubmit={handleLogin} style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+        <form onSubmit={handleLogin} style={{ display: "flex", flexDirection: "column", gap: 16 }}>
           <div>
-            <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>Email</label>
-            <input type="email" value={email} onChange={e => setEmail(e.target.value)} style={inputStyle} required autoFocus />
+            <label style={{ color: COLORS.textMuted, fontSize: 13, fontWeight: 600, display: "block", marginBottom: 6 }}>Correo electrónico</label>
+            <input type="email" value={email} onChange={e => setEmail(e.target.value)} style={{ ...inputStyle, fontSize: 15, padding: "11px 14px" }} required autoFocus placeholder="correo@clinica.cl" />
           </div>
           <div>
-            <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>Contraseña</label>
-            <input type="password" value={password} onChange={e => setPassword(e.target.value)} style={inputStyle} required />
+            <label style={{ color: COLORS.textMuted, fontSize: 13, fontWeight: 600, display: "block", marginBottom: 6 }}>Contraseña</label>
+            <input type="password" value={password} onChange={e => setPassword(e.target.value)} style={{ ...inputStyle, fontSize: 15, padding: "11px 14px" }} required placeholder="••••••••" />
           </div>
-          {error && <div style={{ color: COLORS.danger, fontSize: 13, textAlign: "center" }}>{error}</div>}
-          <button type="submit" disabled={loading} style={{ background: COLORS.accent, color: "#fff", border: "none", borderRadius: 8, padding: "11px", fontWeight: 700, cursor: "pointer", fontSize: 15, marginTop: 4 }}>
+          {error && <div style={{ color: COLORS.danger, fontSize: 13, textAlign: "center", background: "#fee2e2", borderRadius: 8, padding: "8px 12px" }}>{error}</div>}
+          <button type="submit" disabled={loading} style={{ background: COLORS.accent, color: "#fff", border: "none", borderRadius: 10, padding: "13px", fontWeight: 700, cursor: "pointer", fontSize: 15, marginTop: 4, boxShadow: "0 4px 12px rgba(37,99,235,0.35)" }}>
             {loading ? "Ingresando..." : "Ingresar"}
           </button>
         </form>
@@ -903,55 +907,129 @@ export default function App() {
     XLSX.writeFile(wb, `Clinica_Olimpia_${fecha}.xlsx`);
   };
 
-  const tabs = [
-    { id: "dashboard", label: "Inicio", icon: "🏠" },
+  const navItems = [
+    { id: "dashboard", label: "Inicio", icon: "⊞" },
     { id: "agenda", label: "Agenda", icon: "📅" },
     { id: "patients", label: "Pacientes", icon: "👥" },
-    { id: "treatments", label: "Clínico", icon: "🦷" },
+    { id: "treatments", label: "Historial Clínico", icon: "🦷" },
   ];
 
   if (loading) return (
     <div style={{ minHeight: "100vh", background: COLORS.bg, display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: 16 }}>
-      <div style={{ fontSize: 40 }}>🦷</div>
-      <div style={{ color: COLORS.textMuted, fontSize: 14 }}>Cargando...</div>
+      <div style={{ fontSize: 44, marginBottom: 4 }}>🦷</div>
+      <div style={{ color: COLORS.textMuted, fontSize: 14, fontFamily: "'Segoe UI', system-ui, sans-serif" }}>Cargando Clínica Olimpia...</div>
     </div>
   );
 
   if (!session) return <LoginView onLogin={loadData} />;
 
+  const SIDEBAR_W = 220;
+
   return (
-    <div style={{ minHeight: "100vh", background: COLORS.bg, fontFamily: "'Segoe UI', system-ui, sans-serif", color: COLORS.text }}>
-      <div style={{ background: COLORS.surface, borderBottom: `1px solid ${COLORS.border}`, padding: "14px 20px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-        <div>
-          <div style={{ fontWeight: 800, fontSize: 16, color: COLORS.text, letterSpacing: -0.5 }}>🦷 Clínica Olimpia</div>
-          <div style={{ fontSize: 11, color: COLORS.textDim }}>Arturo Prat 350, Of. 506 · Temuco</div>
-        </div>
-        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-          <button onClick={exportarExcel} style={{ background: "#10b98122", color: COLORS.success, border: `1px solid #10b98144`, borderRadius: 6, cursor: "pointer", fontSize: 11, padding: "4px 10px", fontWeight: 600 }}>
-            📥 Exportar Excel
-          </button>
-          <button onClick={copyLink} style={{ background: copied ? COLORS.success + "22" : COLORS.accent + "22", color: copied ? COLORS.success : COLORS.accent, border: `1px solid ${copied ? COLORS.success : COLORS.accent}44`, borderRadius: 6, cursor: "pointer", fontSize: 11, padding: "4px 10px", fontWeight: 600 }}>
-            {copied ? "✓ Copiado" : "🔗 Compartir registro"}
-          </button>
-          <button onClick={handleLogout} style={{ background: "none", border: `1px solid ${COLORS.border}`, borderRadius: 6, color: COLORS.textMuted, cursor: "pointer", fontSize: 11, padding: "4px 10px" }}>Salir</button>
-        </div>
-      </div>
+    <div style={{ minHeight: "100vh", background: COLORS.bg, fontFamily: "'Segoe UI', system-ui, sans-serif", color: COLORS.text, display: "flex" }}>
 
-      <div style={{ padding: "20px 16px", maxWidth: 700, margin: "0 auto", paddingBottom: 90 }}>
-        {view === "dashboard" && <DashboardView appointments={appointments} treatments={treatments} patients={patients} setView={setView} setAgendaConfig={setAgendaConfig} />}
-        {view === "agenda" && <AgendaView key={agendaConfig.date + agendaConfig.filter} appointments={appointments} patients={patients} setAppointments={setAppointments} setView={setView} setSelectedPatient={setSelectedPatient} initialDate={agendaConfig.date} initialFilter={agendaConfig.filter} />}
-        {view === "patients" && <PatientsView patients={patients} setPatients={setPatients} appointments={appointments} treatments={treatments} selectedPatient={selectedPatient} setSelectedPatient={setSelectedPatient} />}
-        {view === "treatments" && <TreatmentsView treatments={treatments} setTreatments={setTreatments} patients={patients} />}
-      </div>
+      {/* SIDEBAR — visible solo en pantallas anchas */}
+      <aside style={{ width: SIDEBAR_W, minHeight: "100vh", background: COLORS.sidebar, display: "flex", flexDirection: "column", position: "fixed", top: 0, left: 0, bottom: 0, zIndex: 50 }}
+        className="sidebar-desktop">
+        {/* Logo */}
+        <div style={{ padding: "24px 20px 20px", borderBottom: "1px solid #2a4f8844" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <div style={{ background: COLORS.accent, borderRadius: 10, width: 36, height: 36, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20 }}>🦷</div>
+            <div>
+              <div style={{ color: "#fff", fontWeight: 800, fontSize: 14, letterSpacing: -0.3 }}>Clínica Olimpia</div>
+              <div style={{ color: COLORS.sidebarText, fontSize: 10, opacity: 0.7 }}>Temuco</div>
+            </div>
+          </div>
+        </div>
 
-      <div style={{ position: "fixed", bottom: 0, left: 0, right: 0, background: COLORS.surface, borderTop: `1px solid ${COLORS.border}`, display: "flex", justifyContent: "space-around", padding: "8px 0 12px" }}>
-        {tabs.map(t => (
-          <button key={t.id} onClick={() => setView(t.id)} style={{ background: "none", border: "none", color: view === t.id ? COLORS.accent : COLORS.textDim, cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "center", gap: 3, padding: "4px 16px" }}>
+        {/* Nav items */}
+        <nav style={{ flex: 1, padding: "16px 12px", display: "flex", flexDirection: "column", gap: 4 }}>
+          {navItems.map(item => {
+            const active = view === item.id;
+            return (
+              <button key={item.id} onClick={() => setView(item.id)}
+                style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 14px", borderRadius: 10, border: "none", background: active ? COLORS.sidebarActive : "transparent", color: active ? "#fff" : COLORS.sidebarText, cursor: "pointer", fontSize: 13, fontWeight: active ? 700 : 400, textAlign: "left", width: "100%", transition: "background 0.15s" }}
+                onMouseEnter={e => { if (!active) e.currentTarget.style.background = "#2a4f9644"; }}
+                onMouseLeave={e => { if (!active) e.currentTarget.style.background = "transparent"; }}>
+                <span style={{ fontSize: 16 }}>{item.icon}</span>
+                {item.label}
+              </button>
+            );
+          })}
+        </nav>
+
+        {/* Footer sidebar */}
+        <div style={{ padding: "16px 12px", borderTop: "1px solid #2a4f8844", display: "flex", flexDirection: "column", gap: 8 }}>
+          <button onClick={exportarExcel}
+            style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 14px", borderRadius: 10, border: "none", background: "transparent", color: COLORS.sidebarText, cursor: "pointer", fontSize: 12, textAlign: "left", width: "100%" }}
+            onMouseEnter={e => e.currentTarget.style.background = "#2a4f9644"}
+            onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+            <span>📥</span> Exportar Excel
+          </button>
+          <button onClick={copyLink}
+            style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 14px", borderRadius: 10, border: "none", background: "transparent", color: copied ? "#34d399" : COLORS.sidebarText, cursor: "pointer", fontSize: 12, textAlign: "left", width: "100%" }}
+            onMouseEnter={e => e.currentTarget.style.background = "#2a4f9644"}
+            onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+            <span>{copied ? "✓" : "🔗"}</span> {copied ? "¡Copiado!" : "Compartir registro"}
+          </button>
+          <button onClick={handleLogout}
+            style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 14px", borderRadius: 10, border: "none", background: "transparent", color: "#fca5a5", cursor: "pointer", fontSize: 12, textAlign: "left", width: "100%" }}
+            onMouseEnter={e => e.currentTarget.style.background = "#7f1d1d44"}
+            onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+            <span>⎋</span> Cerrar sesión
+          </button>
+        </div>
+      </aside>
+
+      {/* CONTENIDO PRINCIPAL */}
+      <main style={{ flex: 1, marginLeft: SIDEBAR_W, minHeight: "100vh", display: "flex", flexDirection: "column" }}
+        className="main-content">
+
+        {/* Top bar */}
+        <header style={{ background: COLORS.surface, borderBottom: `1px solid ${COLORS.border}`, padding: "14px 28px", display: "flex", justifyContent: "space-between", alignItems: "center", boxShadow: "0 1px 3px rgba(0,0,0,0.06)", position: "sticky", top: 0, zIndex: 40 }}>
+          <div>
+            <div style={{ fontWeight: 700, fontSize: 18, color: COLORS.text }}>
+              {navItems.find(n => n.id === view)?.icon} {navItems.find(n => n.id === view)?.label}
+            </div>
+            <div style={{ fontSize: 12, color: COLORS.textMuted }}>Arturo Prat 350, Of. 506 · Temuco</div>
+          </div>
+          <div style={{ fontSize: 12, color: COLORS.textMuted, background: COLORS.bg, padding: "6px 14px", borderRadius: 20, border: `1px solid ${COLORS.border}` }}>
+            {new Date().toLocaleDateString("es-CL", { weekday: "long", day: "numeric", month: "long" })}
+          </div>
+        </header>
+
+        {/* Vistas */}
+        <div style={{ padding: "28px 28px", flex: 1, maxWidth: 900, width: "100%" }}>
+          {view === "dashboard" && <DashboardView appointments={appointments} treatments={treatments} patients={patients} setView={setView} setAgendaConfig={setAgendaConfig} />}
+          {view === "agenda" && <AgendaView key={agendaConfig.date + agendaConfig.filter} appointments={appointments} patients={patients} setAppointments={setAppointments} setView={setView} setSelectedPatient={setSelectedPatient} initialDate={agendaConfig.date} initialFilter={agendaConfig.filter} />}
+          {view === "patients" && <PatientsView patients={patients} setPatients={setPatients} appointments={appointments} treatments={treatments} selectedPatient={selectedPatient} setSelectedPatient={setSelectedPatient} />}
+          {view === "treatments" && <TreatmentsView treatments={treatments} setTreatments={setTreatments} patients={patients} />}
+        </div>
+      </main>
+
+      {/* BOTTOM NAV — solo en móvil */}
+      <nav style={{ position: "fixed", bottom: 0, left: 0, right: 0, background: COLORS.sidebar, borderTop: "1px solid #2a4f8844", display: "flex", justifyContent: "space-around", padding: "8px 0 12px", zIndex: 50 }}
+        className="bottom-nav-mobile">
+        {navItems.map(t => (
+          <button key={t.id} onClick={() => setView(t.id)}
+            style={{ background: "none", border: "none", color: view === t.id ? "#60a5fa" : COLORS.sidebarText, cursor: "pointer", display: "flex", flexDirection: "column", alignItems: "center", gap: 3, padding: "4px 12px" }}>
             <span style={{ fontSize: 20 }}>{t.icon}</span>
-            <span style={{ fontSize: 10, fontWeight: view === t.id ? 700 : 400 }}>{t.label}</span>
+            <span style={{ fontSize: 9, fontWeight: view === t.id ? 700 : 400 }}>{t.label.split(" ")[0]}</span>
           </button>
         ))}
-      </div>
+      </nav>
+
+      <style>{`
+        @media (min-width: 768px) {
+          .bottom-nav-mobile { display: none !important; }
+          .sidebar-desktop { display: flex !important; }
+          .main-content { margin-left: ${SIDEBAR_W}px !important; padding-bottom: 0 !important; }
+        }
+        @media (max-width: 767px) {
+          .sidebar-desktop { display: none !important; }
+          .main-content { margin-left: 0 !important; padding-bottom: 70px; }
+        }
+      `}</style>
     </div>
   );
 }
