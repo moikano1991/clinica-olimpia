@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Registro de Paciente · Clínica Olimpia</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      min-height: 100vh;
+      background: #0a0f1e;
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      color: #f1f5f9;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+    .card {
+      background: #111827;
+      border: 1px solid #1e3a5f;
+      border-radius: 20px;
+      padding: 36px 32px;
+      width: 100%;
+      max-width: 480px;
+    }
+    .header {
+      text-align: center;
+      margin-bottom: 28px;
+    }
+    .header .emoji { font-size: 48px; display: block; margin-bottom: 12px; }
+    .header h1 { font-size: 22px; font-weight: 800; color: #f1f5f9; margin-bottom: 4px; }
+    .header p { font-size: 12px; color: #475569; }
+    .field { margin-bottom: 14px; }
+    label { display: block; font-size: 12px; color: #94a3b8; margin-bottom: 5px; }
+    input {
+      width: 100%;
+      background: #0d1b2a;
+      border: 1px solid #1e3a5f;
+      border-radius: 8px;
+      padding: 10px 12px;
+      color: #f1f5f9;
+      font-size: 14px;
+      outline: none;
+      transition: border-color 0.2s;
+      font-family: inherit;
+    }
+    input:focus { border-color: #0ea5e9; }
+    input::placeholder { color: #475569; }
+    .btn {
+      width: 100%;
+      background: #0ea5e9;
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      padding: 13px;
+      font-size: 15px;
+      font-weight: 700;
+      cursor: pointer;
+      margin-top: 8px;
+      font-family: inherit;
+      transition: background 0.2s;
+    }
+    .btn:hover { background: #0369a1; }
+    .btn:disabled { background: #0369a1; opacity: 0.6; cursor: not-allowed; }
+    .error { color: #ef4444; font-size: 13px; text-align: center; margin-bottom: 10px; }
+    .success {
+      text-align: center;
+      padding: 20px 0;
+    }
+    .success .check { font-size: 64px; display: block; margin-bottom: 16px; }
+    .success h2 { font-size: 22px; color: #f1f5f9; margin-bottom: 10px; }
+    .success p { font-size: 14px; color: #94a3b8; line-height: 1.6; }
+    .footer {
+      text-align: center;
+      margin-top: 24px;
+      font-size: 11px;
+      color: #475569;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="header">
+      <span class="emoji">🦷</span>
+      <h1>Registro de Paciente</h1>
+      <p>Clínica Estética y Dental Olimpia · Arturo Prat 350, Of. 506, Temuco</p>
+    </div>
+
+    <div id="form-container">
+      <div class="field">
+        <label>Nombre completo *</label>
+        <input id="name" type="text" placeholder="Ej: Juan Pérez González" />
+      </div>
+      <div class="field">
+        <label>RUT *</label>
+        <input id="rut" type="text" placeholder="Ej: 12.345.678-9" />
+      </div>
+      <div class="field">
+        <label>Teléfono *</label>
+        <input id="phone" type="text" placeholder="Ej: 56912345678" />
+      </div>
+      <div class="field">
+        <label>Email</label>
+        <input id="email" type="email" placeholder="correo@ejemplo.com" />
+      </div>
+      <div class="field">
+        <label>Fecha de nacimiento</label>
+        <input id="dob" type="date" />
+      </div>
+      <div class="field">
+        <label>Dirección</label>
+        <input id="address" type="text" placeholder="Calle y número, ciudad" />
+      </div>
+      <div class="field">
+        <label>Alergias o condiciones importantes</label>
+        <input id="notes" type="text" placeholder="Ej: Alérgico a penicilina" />
+      </div>
+
+      <div id="error" class="error" style="display:none;"></div>
+      <button class="btn" id="submit-btn" onclick="enviar()">Enviar mis datos</button>
+    </div>
+
+    <div id="success" style="display:none;" class="success">
+      <span class="check">✅</span>
+      <h2>¡Datos recibidos!</h2>
+      <p>Gracias <strong id="nombre-paciente"></strong>, tus datos fueron registrados correctamente.<br>Te contactaremos pronto para confirmar tu cita.</p>
+    </div>
+
+    <div class="footer">🦷 Clínica Estética y Dental Olimpia · Temuco</div>
+  </div>
+
+  <script>
+    const SUPABASE_URL = "https://fiqxqmuczsmtsfwgggvj.supabase.co";
+    const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZpcXhxbXVjenNtdHNmd2dnZ3ZqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg3ODcxNDYsImV4cCI6MjA5NDM2MzE0Nn0.TF8lCdD5MysSbi_pCTe6ICoBx_qpHIe2kAejDTzi9Gg";
+
+    async function enviar() {
+      const name    = document.getElementById("name").value.trim();
+      const rut     = document.getElementById("rut").value.trim();
+      const phone   = document.getElementById("phone").value.trim();
+      const email   = document.getElementById("email").value.trim();
+      const dob     = document.getElementById("dob").value;
+      const address = document.getElementById("address").value.trim();
+      const notes   = document.getElementById("notes").value.trim();
+      const errDiv  = document.getElementById("error");
+      const btn     = document.getElementById("submit-btn");
+
+      errDiv.style.display = "none";
+
+      if (!name || !rut || !phone) {
+        errDiv.textContent = "Nombre, RUT y teléfono son obligatorios.";
+        errDiv.style.display = "block";
+        return;
+      }
+
+      btn.disabled = true;
+      btn.textContent = "Guardando...";
+
+      const res = await fetch(`${SUPABASE_URL}/rest/v1/patients`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "apikey": SUPABASE_KEY,
+          "Authorization": `Bearer ${SUPABASE_KEY}`,
+          "Prefer": "return=minimal"
+        },
+        body: JSON.stringify({ name, rut, phone, email, dob, address, notes })
+      });
+
+      if (res.ok) {
+        document.getElementById("form-container").style.display = "none";
+        document.getElementById("nombre-paciente").textContent = name.split(" ")[0];
+        document.getElementById("success").style.display = "block";
+      } else {
+        errDiv.textContent = "Error al guardar. Por favor intenta nuevamente.";
+        errDiv.style.display = "block";
+        btn.disabled = false;
+        btn.textContent = "Enviar mis datos";
+      }
+    }
+
+    // Permitir enviar con Enter
+    document.addEventListener("keypress", e => {
+      if (e.key === "Enter") enviar();
+    });
+  </script>
+</body>
+</html>

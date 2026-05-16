@@ -678,7 +678,7 @@ export default function App() {
   const [session, setSession] = useState(null);
   const [copied, setCopied] = useState(false);
 
-  const shareLink = `${window.location.origin}${window.location.pathname}#registro`;
+  const shareLink = `${window.location.origin}${window.location.pathname}registro/`;
   const copyLink = () => {
     navigator.clipboard.writeText(shareLink);
     setCopied(true);
