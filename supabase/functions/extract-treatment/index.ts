@@ -28,7 +28,7 @@ Extrae los datos del siguiente texto y responde ÚNICAMENTE con un objeto JSON v
   "patientName": "Nombre del paciente mencionado (null si no se menciona)",
   "date": "Fecha en YYYY-MM-DD (null si no se menciona, hoy es ${new Date().toISOString().split("T")[0]})",
   "procedure": "Procedimiento dental (null si no se menciona). Valores posibles: Limpieza dental, Extracción simple, Extracción quirúrgica, Obturación resina, Obturación amalgama, Radiografía periapical, Radiografía panorámica, Blanqueamiento, Corona cerámica, Prótesis removible, Implante, Endodoncia, Periodoncia, Ortodoncia consulta, Sellantes",
-  "tooth": "Número de pieza dental (ej: 36) o null",
+  "tooth": "Número de pieza dental en nomenclatura FDI/ISO 3950 (ej: 36, 11, 46). Cuadrante 1=sup.der, 2=sup.izq, 3=inf.izq, 4=inf.der. Si menciona varias, separar con coma (ej: '36,46'). null si no se menciona",
   "cost": "Costo total en números enteros pesos chilenos (ej: 50000). Si dice 'cincuenta mil' pon 50000. null si no se menciona",
   "paid": "Monto pagado en números enteros pesos chilenos. null si no se menciona",
   "notes": "Observaciones, notas clínicas o comentarios adicionales (null si no se menciona)"

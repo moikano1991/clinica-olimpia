@@ -503,7 +503,7 @@ function PatientsView({ patients, setPatients, appointments, treatments, selecte
               <div key={t.id} style={{ background: COLORS.card, border: `1px solid ${COLORS.border}`, borderRadius: 10, padding: "12px 16px", display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
                 <div>
                   <div style={{ color: COLORS.text, fontWeight: 600 }}>{formatDate(t.date)} — {t.procedure}</div>
-                  {t.tooth !== "-" && <div style={{ color: COLORS.textMuted, fontSize: 12 }}>Pieza: {t.tooth}</div>}
+                  {t.tooth && t.tooth !== "-" && <div style={{ color: COLORS.textMuted, fontSize: 12 }}>🦷 FDI {t.tooth}</div>}
                   {t.notes && <div style={{ color: COLORS.textDim, fontSize: 12 }}>{t.notes}</div>}
                 </div>
                 <div style={{ textAlign: "right" }}>
@@ -647,6 +647,81 @@ function PatientsView({ patients, setPatients, appointments, treatments, selecte
   );
 }
 
+// ── Selector FDI / ISO 3950 ──────────────────────────────────────────
+function ToothSelector({ value, onChange }) {
+  // Cuadrantes FDI: 1=Sup.Der, 2=Sup.Izq, 3=Inf.Izq, 4=Inf.Der
+  // Fila superior: Q1 (18→11) | Q2 (21→28)
+  // Fila inferior: Q4 (48→41) | Q3 (31→38)
+  const upperLeft  = [18,17,16,15,14,13,12,11];
+  const upperRight = [21,22,23,24,25,26,27,28];
+  const lowerLeft  = [48,47,46,45,44,43,42,41];
+  const lowerRight = [31,32,33,34,35,36,37,38];
+
+  const toothName = {
+    11:"Inc.C",12:"Inc.L",13:"Can",14:"Pre1",15:"Pre2",16:"Mol1",17:"Mol2",18:"Mol3",
+    21:"Inc.C",22:"Inc.L",23:"Can",24:"Pre1",25:"Pre2",26:"Mol1",27:"Mol2",28:"Mol3",
+    31:"Inc.C",32:"Inc.L",33:"Can",34:"Pre1",35:"Pre2",36:"Mol1",37:"Mol2",38:"Mol3",
+    41:"Inc.C",42:"Inc.L",43:"Can",44:"Pre1",45:"Pre2",46:"Mol1",47:"Mol2",48:"Mol3",
+  };
+
+  const selected = value && value !== "-" ? value.split(",").map(v => v.trim()).filter(Boolean) : [];
+
+  const toggle = (tooth) => {
+    const t = String(tooth);
+    const next = selected.includes(t) ? selected.filter(s => s !== t) : [...selected, t];
+    onChange(next.length ? next.join(",") : "-");
+  };
+
+  const Btn = ({ t }) => {
+    const on = selected.includes(String(t));
+    return (
+      <button type="button" title={`${t} — ${toothName[t]}`} onClick={() => toggle(t)}
+        style={{ width: 26, height: 26, borderRadius: 4, padding: 0, fontSize: 9, fontWeight: 700, cursor: "pointer",
+          border: on ? `2px solid ${COLORS.accent}` : `1px solid ${COLORS.border}`,
+          background: on ? COLORS.accent : COLORS.surface,
+          color: on ? "#fff" : COLORS.text, transition: "all 0.1s" }}>
+        {t}
+      </button>
+    );
+  };
+
+  const Row = ({ left, right }) => (
+    <div style={{ display: "flex", justifyContent: "center", gap: 2 }}>
+      {left.map(t => <Btn key={t} t={t} />)}
+      <div style={{ width: 6, borderLeft: `1px dashed ${COLORS.border}` }} />
+      {right.map(t => <Btn key={t} t={t} />)}
+    </div>
+  );
+
+  return (
+    <div style={{ background: COLORS.bg, border: `1px solid ${COLORS.border}`, borderRadius: 10, padding: "12px 10px" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: COLORS.textDim, marginBottom: 6, padding: "0 2px" }}>
+        <span>D — Derecha px</span>
+        <span style={{ color: COLORS.textMuted, fontWeight: 700, fontSize: 9 }}>FDI / ISO 3950</span>
+        <span>Izquierda px — I</span>
+      </div>
+      <Row left={upperLeft} right={upperRight} />
+      <div style={{ height: 6, borderBottom: `1px dashed ${COLORS.border}`, margin: "3px 0" }} />
+      <Row left={lowerLeft} right={lowerRight} />
+      {selected.length > 0 ? (
+        <div style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+          <span style={{ color: COLORS.accent, fontSize: 13, fontWeight: 700 }}>
+            Pieza{selected.length > 1 ? "s" : ""}: {selected.join(", ")}
+          </span>
+          <button type="button" onClick={() => onChange("-")}
+            style={{ background: "none", border: "none", color: COLORS.textMuted, cursor: "pointer", fontSize: 13 }}>
+            × Limpiar
+          </button>
+        </div>
+      ) : (
+        <div style={{ marginTop: 6, fontSize: 11, color: COLORS.textDim, textAlign: "center" }}>
+          Selecciona el/los dientes afectados (puedes elegir varios)
+        </div>
+      )}
+    </div>
+  );
+}
+
 function TreatmentsView({ treatments, setTreatments, patients }) {
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({ patientId: "", date: today(), procedure: "Limpieza dental", tooth: "-", cost: "", paid: "", status: "completado", notes: "" });
@@ -758,7 +833,7 @@ function TreatmentsView({ treatments, setTreatments, patients }) {
               <div style={{ display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
                 <div>
                   <div style={{ color: COLORS.text, fontWeight: 600 }}>{p?.name} — {t.procedure}</div>
-                  <div style={{ color: COLORS.textMuted, fontSize: 12, marginTop: 2 }}>📅 {formatDate(t.date)}{t.tooth && t.tooth !== "-" ? ` · Pieza ${t.tooth}` : ""}</div>
+                  <div style={{ color: COLORS.textMuted, fontSize: 12, marginTop: 2 }}>📅 {formatDate(t.date)}{t.tooth && t.tooth !== "-" ? ` · 🦷 FDI ${t.tooth}` : ""}</div>
                   {t.notes && <div style={{ color: COLORS.textDim, fontSize: 12 }}>{t.notes}</div>}
                 </div>
                 <div style={{ textAlign: "right" }}>
@@ -907,7 +982,6 @@ function TreatmentsView({ treatments, setTreatments, patients }) {
                 { label: "Paciente", key: "patientId", type: "select", options: patients.map(p => ({ value: p.id, label: p.name })) },
                 { label: "Fecha", key: "date", type: "date" },
                 { label: "Procedimiento", key: "procedure", type: "select", options: treatmentCatalog.map(t => ({ value: t, label: t })) },
-                { label: "Pieza dental (ej: 36)", key: "tooth", type: "text" },
                 { label: "Costo total ($)", key: "cost", type: "number" },
                 { label: "Monto pagado ($)", key: "paid", type: "number" },
                 { label: "Notas", key: "notes", type: "text" },
@@ -924,6 +998,11 @@ function TreatmentsView({ treatments, setTreatments, patients }) {
                   )}
                 </div>
               ))}
+              {/* Selector FDI de piezas dentales */}
+              <div>
+                <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 6 }}>Pieza(s) dental(es) — Nomenclatura FDI</label>
+                <ToothSelector value={form.tooth} onChange={v => setForm(f => ({ ...f, tooth: v }))} />
+              </div>
             </div>
             <div style={{ display: "flex", gap: 10, marginTop: 20 }}>
               <button onClick={save} style={{ flex: 1, background: COLORS.accent, color: "#fff", border: "none", borderRadius: 8, padding: "10px", fontWeight: 700, cursor: "pointer" }}>Guardar</button>
