@@ -1064,6 +1064,256 @@ function TreatmentsView({ treatments, setTreatments, patients }) {
   );
 }
 
+// ── Dashboard de rendimiento mensual ────────────────────────────────
+function PerformanceView({ appointments, treatments, patients }) {
+  const [month, setMonth] = useState(() => today().slice(0, 7));
+
+  const prevMonthStr = (m) => {
+    const [y, mo] = m.split("-").map(Number);
+    const d = new Date(y, mo - 2, 1);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+  };
+  const nextMonthStr = (m) => {
+    const [y, mo] = m.split("-").map(Number);
+    const d = new Date(y, mo, 1);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+  };
+
+  const [year, mo] = month.split("-").map(Number);
+  const daysInMonth = new Date(year, mo, 0).getDate();
+  const monthLabel = new Date(year, mo - 1, 1)
+    .toLocaleDateString("es-CL", { month: "long", year: "numeric" })
+    .replace(/^./, c => c.toUpperCase());
+  const prevM = prevMonthStr(month);
+
+  // Datos del mes actual y anterior
+  const mT = treatments.filter(t => t.date.startsWith(month));
+  const mA = appointments.filter(a => a.date.startsWith(month));
+  const pmT = treatments.filter(t => t.date.startsWith(prevM));
+  const pmA = appointments.filter(a => a.date.startsWith(prevM));
+
+  // KPIs principales
+  const revenue   = mT.reduce((s, t) => s + (t.paid || 0), 0);
+  const billed    = mT.reduce((s, t) => s + (t.cost || 0), 0);
+  const debt      = billed - revenue;
+  const collRate  = billed > 0 ? Math.round(revenue / billed * 100) : 0;
+  const prevRev   = pmT.reduce((s, t) => s + (t.paid || 0), 0);
+  const prevBill  = pmT.reduce((s, t) => s + (t.cost || 0), 0);
+
+  const totalA    = mA.length;
+  const confirmedA = mA.filter(a => ["confirmada", "completada", "completado"].includes(a.status)).length;
+  const cancelledA = mA.filter(a => a.status === "cancelada").length;
+  const pendingA   = mA.filter(a => a.status === "pendiente").length;
+  const attendRate = totalA > 0 ? Math.round(confirmedA / totalA * 100) : 0;
+  const prevTotalA = pmA.length;
+
+  const newPatients = patients.filter(p => (p.created_at || "").startsWith(month)).length;
+  const prevNewP    = patients.filter(p => (p.created_at || "").startsWith(prevM)).length;
+
+  // Delta vs mes anterior
+  const delta = (cur, prev) => {
+    if (prev === 0 && cur === 0) return null;
+    if (prev === 0) return { label: "Nuevo", color: COLORS.success };
+    const p = Math.round((cur - prev) / prev * 100);
+    if (p > 0) return { label: `↑ ${p}%`, color: COLORS.success };
+    if (p < 0) return { label: `↓ ${Math.abs(p)}%`, color: COLORS.danger };
+    return { label: "= 0%", color: COLORS.textMuted };
+  };
+
+  // Datos diarios para el gráfico de barras
+  const dailyData = Array.from({ length: daysInMonth }, (_, i) => {
+    const d = String(i + 1).padStart(2, "0");
+    const dateStr = `${month}-${d}`;
+    const dow = new Date(dateStr).getDay();
+    return {
+      day: i + 1,
+      dateStr,
+      revenue: mT.filter(t => t.date === dateStr).reduce((s, t) => s + (t.paid || 0), 0),
+      appts:   mA.filter(a => a.date === dateStr).length,
+      isToday: dateStr === today(),
+      isWeekend: dow === 0 || dow === 6,
+    };
+  });
+  const maxDailyRev = Math.max(...dailyData.map(d => d.revenue), 1);
+
+  // Procedimientos
+  const procMap = {};
+  mT.forEach(t => {
+    if (!procMap[t.procedure]) procMap[t.procedure] = { count: 0, revenue: 0 };
+    procMap[t.procedure].count++;
+    procMap[t.procedure].revenue += t.paid || 0;
+  });
+  const topProcs = Object.entries(procMap)
+    .sort((a, b) => b[1].count - a[1].count)
+    .slice(0, 7);
+  const maxProcCount = Math.max(...topProcs.map(p => p[1].count), 1);
+
+  const Card = ({ icon, label, value, sub, delta: d, color = COLORS.accent, bg = "#eff6ff", small = false }) => (
+    <div style={{ background: COLORS.card, border: `1px solid ${COLORS.border}`, borderRadius: 14, padding: "16px 18px", boxShadow: "0 1px 4px rgba(0,0,0,0.06)" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+        <div style={{ width: 36, height: 36, borderRadius: 9, background: bg, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18 }}>{icon}</div>
+        {d && <span style={{ fontSize: 11, fontWeight: 700, color: d.color, background: d.color + "18", padding: "2px 8px", borderRadius: 20 }}>{d.label}</span>}
+      </div>
+      <div style={{ color: COLORS.text, fontWeight: 800, fontSize: small ? 17 : 24, marginTop: 10, lineHeight: 1.1 }}>{value}</div>
+      <div style={{ color: COLORS.textMuted, fontSize: 12, marginTop: 4 }}>{label}</div>
+      {sub && <div style={{ color: COLORS.textDim, fontSize: 11, marginTop: 2 }}>{sub}</div>}
+    </div>
+  );
+
+  return (
+    <div>
+      {/* Selector de mes */}
+      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 24, background: COLORS.card, border: `1px solid ${COLORS.border}`, borderRadius: 12, padding: "12px 18px", width: "fit-content" }}>
+        <button onClick={() => setMonth(prevMonthStr(month))}
+          style={{ background: COLORS.bg, border: `1px solid ${COLORS.border}`, borderRadius: 8, width: 32, height: 32, cursor: "pointer", fontSize: 16, display: "flex", alignItems: "center", justifyContent: "center", color: COLORS.text }}>‹</button>
+        <span style={{ fontWeight: 700, fontSize: 16, color: COLORS.text, minWidth: 160, textAlign: "center" }}>{monthLabel}</span>
+        <button onClick={() => setMonth(nextMonthStr(month))}
+          style={{ background: COLORS.bg, border: `1px solid ${COLORS.border}`, borderRadius: 8, width: 32, height: 32, cursor: "pointer", fontSize: 16, display: "flex", alignItems: "center", justifyContent: "center", color: COLORS.text }}>›</button>
+      </div>
+
+      {/* Fila 1: Ingresos */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 12, marginBottom: 12 }}>
+        <Card icon="💰" label="Ingresos cobrados" value={formatCLP(revenue)} sub={`vs ${formatCLP(prevRev)} mes ant.`} delta={delta(revenue, prevRev)} bg="#f0fdf4" />
+        <Card icon="📋" label="Total facturado"   value={formatCLP(billed)}  sub={`vs ${formatCLP(prevBill)} mes ant.`} delta={delta(billed, prevBill)}   bg="#eff6ff" />
+        <Card icon="💸" label="Por cobrar"        value={formatCLP(debt)}    sub={`${mT.filter(t=>t.cost>t.paid).length} tratamientos`} bg="#fff1f2" color={COLORS.danger} />
+        <Card icon="📊" label="Tasa de cobro"     value={`${collRate}%`}     sub={`${mT.length} tratamientos`} bg="#fdf4ff" color="#7c3aed" />
+      </div>
+
+      {/* Fila 2: Citas */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 12, marginBottom: 28 }}>
+        <Card icon="📅" label="Total citas"       value={totalA}       sub={`vs ${prevTotalA} mes ant.`} delta={delta(totalA, prevTotalA)} bg="#eff6ff" />
+        <Card icon="✅" label="Confirmadas/Realiz" value={confirmedA}   sub={`${attendRate}% asistencia`} bg="#f0fdf4" color={COLORS.success} />
+        <Card icon="❌" label="Canceladas"         value={cancelledA}   sub={`${pendingA} pendientes`}    bg="#fff1f2" color={COLORS.danger} />
+        <Card icon="👥" label="Pacientes nuevos"   value={newPatients}  sub={`vs ${prevNewP} mes ant.`} delta={delta(newPatients, prevNewP)} bg="#fdf4ff" color="#7c3aed" />
+      </div>
+
+      {/* Gráfico diario de ingresos */}
+      <div style={{ background: COLORS.card, border: `1px solid ${COLORS.border}`, borderRadius: 14, padding: "20px 18px", marginBottom: 24 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+          <h3 style={{ margin: 0, color: COLORS.text, fontSize: 15 }}>💰 Ingresos diarios</h3>
+          <span style={{ fontSize: 12, color: COLORS.textMuted }}>Total: {formatCLP(revenue)}</span>
+        </div>
+        <div style={{ overflowX: "auto", paddingBottom: 4 }}>
+          <div style={{ display: "flex", alignItems: "flex-end", gap: 3, height: 90, minWidth: daysInMonth * 24 }}>
+            {dailyData.map(d => {
+              const h = d.revenue > 0 ? Math.max(Math.round((d.revenue / maxDailyRev) * 82), 6) : 0;
+              return (
+                <div key={d.day} title={`${d.dateStr}\n${formatCLP(d.revenue)}\n${d.appts} cita${d.appts !== 1 ? "s" : ""}`}
+                  style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", cursor: "default", minWidth: 18 }}>
+                  {d.appts > 0 && <div style={{ width: 5, height: 5, borderRadius: "50%", background: COLORS.accent, marginBottom: 3, opacity: 0.7 }} />}
+                  <div style={{ width: "100%", height: h || 3, borderRadius: "3px 3px 0 0",
+                    background: d.isToday ? COLORS.warning : d.revenue > 0 ? COLORS.accent : COLORS.border,
+                    opacity: d.isWeekend && d.revenue === 0 ? 0.3 : 1,
+                    transition: "opacity 0.2s" }} />
+                </div>
+              );
+            })}
+          </div>
+          {/* Eje X */}
+          <div style={{ display: "flex", gap: 3, marginTop: 4, minWidth: daysInMonth * 24 }}>
+            {dailyData.map(d => (
+              <div key={d.day} style={{ flex: 1, minWidth: 18, textAlign: "center", fontSize: 8, color: d.isToday ? COLORS.warning : COLORS.textDim, fontWeight: d.isToday ? 700 : 400 }}>
+                {d.day % 5 === 1 || d.day === 1 ? d.day : ""}
+              </div>
+            ))}
+          </div>
+        </div>
+        <div style={{ display: "flex", gap: 14, marginTop: 10, fontSize: 11, color: COLORS.textDim }}>
+          <span>● Punto = cita agendada</span>
+          <span style={{ color: COLORS.warning }}>■ Hoy</span>
+          <span style={{ color: COLORS.accent }}>■ Con ingresos</span>
+        </div>
+      </div>
+
+      {/* Dos columnas: procedimientos + estado citas */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 24 }}>
+
+        {/* Procedimientos más frecuentes */}
+        <div style={{ background: COLORS.card, border: `1px solid ${COLORS.border}`, borderRadius: 14, padding: "20px 18px" }}>
+          <h3 style={{ margin: "0 0 16px", color: COLORS.text, fontSize: 15 }}>🦷 Procedimientos del mes</h3>
+          {topProcs.length === 0
+            ? <div style={{ color: COLORS.textDim, fontSize: 13 }}>Sin tratamientos este mes</div>
+            : topProcs.map(([proc, data]) => (
+              <div key={proc} style={{ marginBottom: 12 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
+                  <span style={{ fontSize: 12, color: COLORS.text, fontWeight: 600 }}>{proc}</span>
+                  <span style={{ fontSize: 11, color: COLORS.textMuted }}>{data.count}x · {formatCLP(data.revenue)}</span>
+                </div>
+                <div style={{ height: 6, background: COLORS.border, borderRadius: 4, overflow: "hidden" }}>
+                  <div style={{ height: "100%", width: `${Math.round(data.count / maxProcCount * 100)}%`, background: COLORS.accent, borderRadius: 4, transition: "width 0.5s" }} />
+                </div>
+              </div>
+            ))
+          }
+        </div>
+
+        {/* Estado de citas */}
+        <div style={{ background: COLORS.card, border: `1px solid ${COLORS.border}`, borderRadius: 14, padding: "20px 18px" }}>
+          <h3 style={{ margin: "0 0 16px", color: COLORS.text, fontSize: 15 }}>📅 Estado de citas</h3>
+          {totalA === 0
+            ? <div style={{ color: COLORS.textDim, fontSize: 13 }}>Sin citas este mes</div>
+            : (
+              <>
+                {/* Barra apilada */}
+                <div style={{ height: 12, borderRadius: 6, overflow: "hidden", display: "flex", marginBottom: 16 }}>
+                  {confirmedA > 0 && <div style={{ flex: confirmedA, background: COLORS.success }} />}
+                  {pendingA   > 0 && <div style={{ flex: pendingA,   background: COLORS.warning }} />}
+                  {cancelledA > 0 && <div style={{ flex: cancelledA, background: COLORS.danger  }} />}
+                </div>
+                {[
+                  { label: "Confirmadas / Realizadas", count: confirmedA, color: COLORS.success },
+                  { label: "Pendientes",               count: pendingA,   color: COLORS.warning },
+                  { label: "Canceladas",               count: cancelledA, color: COLORS.danger  },
+                ].map(s => (
+                  <div key={s.label} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <div style={{ width: 10, height: 10, borderRadius: 3, background: s.color, flexShrink: 0 }} />
+                      <span style={{ fontSize: 13, color: COLORS.text }}>{s.label}</span>
+                    </div>
+                    <div style={{ textAlign: "right" }}>
+                      <span style={{ fontSize: 15, fontWeight: 700, color: COLORS.text }}>{s.count}</span>
+                      <span style={{ fontSize: 11, color: COLORS.textMuted, marginLeft: 4 }}>({totalA > 0 ? Math.round(s.count / totalA * 100) : 0}%)</span>
+                    </div>
+                  </div>
+                ))}
+                <div style={{ marginTop: 8, paddingTop: 12, borderTop: `1px solid ${COLORS.border}` }}>
+                  <div style={{ display: "flex", justifyContent: "space-between" }}>
+                    <span style={{ fontSize: 13, color: COLORS.textMuted }}>Total citas</span>
+                    <span style={{ fontWeight: 700, color: COLORS.text }}>{totalA}</span>
+                  </div>
+                </div>
+              </>
+            )
+          }
+        </div>
+      </div>
+
+      {/* Resumen vs mes anterior */}
+      <div style={{ background: COLORS.card, border: `1px solid ${COLORS.border}`, borderRadius: 14, padding: "20px 18px" }}>
+        <h3 style={{ margin: "0 0 16px", color: COLORS.text, fontSize: 15 }}>📈 Comparación vs mes anterior</h3>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 12 }}>
+          {[
+            { label: "Ingresos cobrados", cur: revenue,      prev: prevRev,    fmt: formatCLP },
+            { label: "Total facturado",   cur: billed,       prev: prevBill,   fmt: formatCLP },
+            { label: "Nº citas",          cur: totalA,       prev: prevTotalA, fmt: x => x },
+            { label: "Pacientes nuevos",  cur: newPatients,  prev: prevNewP,   fmt: x => x },
+          ].map(({ label, cur, prev, fmt }) => {
+            const d = delta(cur, prev);
+            return (
+              <div key={label} style={{ background: COLORS.bg, borderRadius: 10, padding: "12px 14px" }}>
+                <div style={{ fontSize: 11, color: COLORS.textMuted, marginBottom: 6 }}>{label}</div>
+                <div style={{ fontWeight: 800, fontSize: 18, color: COLORS.text }}>{fmt(cur)}</div>
+                <div style={{ fontSize: 11, color: COLORS.textDim, marginTop: 2 }}>ant: {fmt(prev)}</div>
+                {d && <div style={{ marginTop: 6, fontSize: 12, fontWeight: 700, color: d.color }}>{d.label}</div>}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function DashboardView({ appointments, treatments, patients, setView, setAgendaConfig }) {
   const todayAppts = appointments.filter(a => a.date === today());
   const pending = appointments.filter(a => a.status === "pendiente").length;
@@ -1343,10 +1593,11 @@ export default function App() {
   };
 
   const navItems = [
-    { id: "dashboard", label: "Inicio", icon: "⊞" },
-    { id: "agenda", label: "Agenda", icon: "📅" },
-    { id: "patients", label: "Pacientes", icon: "👥" },
-    { id: "treatments", label: "Historial Clínico", icon: "🦷" },
+    { id: "dashboard",    label: "Inicio",           icon: "⊞" },
+    { id: "agenda",       label: "Agenda",            icon: "📅" },
+    { id: "patients",     label: "Pacientes",         icon: "👥" },
+    { id: "treatments",   label: "Historial Clínico", icon: "🦷" },
+    { id: "performance",  label: "Rendimiento",       icon: "📊" },
   ];
 
   if (loading) return (
@@ -1443,10 +1694,11 @@ export default function App() {
 
         {/* Vistas */}
         <div style={{ padding: "28px 28px", flex: 1, maxWidth: 900, width: "100%" }}>
-          {view === "dashboard" && <DashboardView appointments={appointments} treatments={treatments} patients={patients} setView={setView} setAgendaConfig={setAgendaConfig} />}
-          {view === "agenda" && <AgendaView key={agendaConfig.date + agendaConfig.filter} appointments={appointments} patients={patients} setAppointments={setAppointments} setView={setView} setSelectedPatient={setSelectedPatient} initialDate={agendaConfig.date} initialFilter={agendaConfig.filter} />}
-          {view === "patients" && <PatientsView patients={patients} setPatients={setPatients} appointments={appointments} treatments={treatments} selectedPatient={selectedPatient} setSelectedPatient={setSelectedPatient} />}
-          {view === "treatments" && <TreatmentsView treatments={treatments} setTreatments={setTreatments} patients={patients} />}
+          {view === "dashboard"   && <DashboardView appointments={appointments} treatments={treatments} patients={patients} setView={setView} setAgendaConfig={setAgendaConfig} />}
+          {view === "agenda"      && <AgendaView key={agendaConfig.date + agendaConfig.filter} appointments={appointments} patients={patients} setAppointments={setAppointments} setView={setView} setSelectedPatient={setSelectedPatient} initialDate={agendaConfig.date} initialFilter={agendaConfig.filter} />}
+          {view === "patients"    && <PatientsView patients={patients} setPatients={setPatients} appointments={appointments} treatments={treatments} selectedPatient={selectedPatient} setSelectedPatient={setSelectedPatient} />}
+          {view === "treatments"  && <TreatmentsView treatments={treatments} setTreatments={setTreatments} patients={patients} />}
+          {view === "performance" && <PerformanceView appointments={appointments} treatments={treatments} patients={patients} />}
         </div>
       </main>
 
