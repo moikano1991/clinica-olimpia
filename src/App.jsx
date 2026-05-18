@@ -351,13 +351,13 @@ function PatientsView({ patients, setPatients, appointments, treatments, selecte
     setIsRecording(false);
   };
 
-  const extractVoice = async () => {
+  const extractVoiceInto = async (setter) => {
     if (!transcript) return;
     setIsExtracting(true);
     try {
       const { data } = await supabase.functions.invoke("extract-patient", { body: { text: transcript } });
       if (data && !data.error) {
-        setForm(f => ({
+        setter(f => ({
           name: data.name || f.name,
           rut: data.rut || f.rut,
           phone: data.phone || f.phone,
@@ -433,7 +433,38 @@ function PatientsView({ patients, setPatients, appointments, treatments, selecte
         {showEditForm && (
           <div style={{ position: "fixed", inset: 0, background: "#00000088", zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
             <div style={{ background: COLORS.surface, border: `1px solid ${COLORS.border}`, borderRadius: 16, padding: 28, width: "100%", maxWidth: 480, maxHeight: "90vh", overflowY: "auto" }}>
-              <h3 style={{ color: COLORS.text, margin: "0 0 20px" }}>Editar Paciente</h3>
+              <h3 style={{ color: COLORS.text, margin: "0 0 16px" }}>Editar Paciente</h3>
+
+              {/* Voz en editar paciente */}
+              <div style={{ background: "#eff6ff", border: "1px dashed #93c5fd", borderRadius: 10, padding: 12, marginBottom: 18 }}>
+                <div style={{ color: COLORS.accent, fontSize: 12, fontWeight: 700, marginBottom: 8 }}>🎤 Actualizar datos por voz</div>
+                <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                  <button onClick={isRecording ? stopVoice : startVoice}
+                    style={{ background: isRecording ? COLORS.danger : COLORS.accent, color: "#fff", border: "none", borderRadius: 8, padding: "7px 14px", fontWeight: 700, cursor: "pointer", fontSize: 13 }}>
+                    {isRecording ? "⏹ Detener" : "🎤 Grabar"}
+                  </button>
+                  {isRecording && <span style={{ color: COLORS.danger, fontSize: 12, fontWeight: 700 }}>⬤ Grabando...</span>}
+                </div>
+                {transcript && isRecording && (
+                  <div style={{ marginTop: 8, color: COLORS.textMuted, fontSize: 12, fontStyle: "italic", background: "#fff", borderRadius: 8, padding: "6px 10px" }}>"{transcript}"</div>
+                )}
+                {transcript && !isRecording && (
+                  <div style={{ marginTop: 10 }}>
+                    <div style={{ background: "#fff", border: "1px solid #bfdbfe", borderRadius: 8, padding: "8px 12px", color: COLORS.text, fontSize: 13, marginBottom: 8, fontStyle: "italic" }}>"{transcript}"</div>
+                    <div style={{ display: "flex", gap: 8 }}>
+                      <button onClick={() => extractVoiceInto(setEditForm)} disabled={isExtracting}
+                        style={{ background: COLORS.accent, color: "#fff", border: "none", borderRadius: 8, padding: "7px 14px", fontSize: 13, fontWeight: 700, cursor: isExtracting ? "not-allowed" : "pointer", opacity: isExtracting ? 0.7 : 1 }}>
+                        {isExtracting ? "⏳ Extrayendo..." : "✨ Actualizar campos"}
+                      </button>
+                      <button onClick={() => setTranscript("")}
+                        style={{ background: "none", border: `1px solid ${COLORS.border}`, color: COLORS.textMuted, borderRadius: 8, padding: "7px 12px", fontSize: 13, cursor: "pointer" }}>
+                        × Descartar
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+
               <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
                 {fields.map(f => (
                   <div key={f.key}>
@@ -562,7 +593,7 @@ function PatientsView({ patients, setPatients, appointments, treatments, selecte
                     "{transcript}"
                   </div>
                   <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                    <button onClick={extractVoice} disabled={isExtracting}
+                    <button onClick={() => extractVoiceInto(setForm)} disabled={isExtracting}
                       style={{ background: COLORS.accent, color: "#fff", border: "none", borderRadius: 8, padding: "7px 14px", fontSize: 13, fontWeight: 700, cursor: isExtracting ? "not-allowed" : "pointer", opacity: isExtracting ? 0.7 : 1 }}>
                       {isExtracting ? "⏳ Extrayendo..." : "✨ Rellenar formulario"}
                     </button>
@@ -620,27 +651,94 @@ function TreatmentsView({ treatments, setTreatments, patients }) {
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({ patientId: "", date: today(), procedure: "Limpieza dental", tooth: "-", cost: "", paid: "", status: "completado", notes: "" });
 
+  // Editar pago
+  const [editPayment, setEditPayment] = useState(null); // { id, cost, paid, status, patientName, procedure }
+
+  // Voz para tratamientos
+  const [isRecordingT, setIsRecordingT] = useState(false);
+  const [transcriptT, setTranscriptT] = useState("");
+  const [isExtractingT, setIsExtractingT] = useState(false);
+  const recRefT = useRef(null);
+
   const getPatient = (id) => patients.find(p => p.id === Number(id));
 
   const save = async () => {
     if (!form.patientId || !form.procedure) return;
+    const paidNum = Number(form.paid) || 0;
+    const costNum = Number(form.cost) || 0;
+    const autoStatus = paidNum >= costNum && costNum > 0 ? "completado" : paidNum > 0 ? "pendiente pago" : form.status;
     const { data, error } = await supabase.from("treatments").insert([{
       patient_id: Number(form.patientId), date: form.date, procedure: form.procedure,
-      tooth: form.tooth, cost: Number(form.cost), paid: Number(form.paid),
-      status: form.status, notes: form.notes,
+      tooth: form.tooth || "-", cost: costNum, paid: paidNum,
+      status: autoStatus, notes: form.notes,
     }]).select().single();
     if (!error) {
       setTreatments(prev => [...prev, toTreat(data)]);
+      setForm({ patientId: "", date: today(), procedure: "Limpieza dental", tooth: "-", cost: "", paid: "", status: "completado", notes: "" });
       setShowForm(false);
     }
   };
 
-  const registerPayment = async (id, amount) => {
-    const t = treatments.find(t => t.id === id);
-    const newPaid = Math.min(t.paid + amount, t.cost);
-    const newStatus = newPaid >= t.cost ? "completado" : "pendiente pago";
-    await supabase.from("treatments").update({ paid: newPaid, status: newStatus }).eq("id", id);
-    setTreatments(prev => prev.map(t => t.id === id ? { ...t, paid: newPaid, status: newStatus } : t));
+  const savePaymentEdit = async () => {
+    if (!editPayment) return;
+    const paidNum = Number(editPayment.paid) || 0;
+    const costNum = Number(editPayment.cost) || 0;
+    const newStatus = paidNum >= costNum && costNum > 0 ? "completado" : paidNum > 0 ? "pendiente pago" : "pendiente pago";
+    await supabase.from("treatments").update({ paid: paidNum, status: newStatus }).eq("id", editPayment.id);
+    setTreatments(prev => prev.map(t => t.id === editPayment.id ? { ...t, paid: paidNum, status: newStatus } : t));
+    setEditPayment(null);
+  };
+
+  const startVoiceT = () => {
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) { alert("Solo funciona en Chrome o Edge."); return; }
+    const rec = new SR();
+    rec.lang = "es-CL";
+    rec.continuous = true;
+    rec.interimResults = true;
+    rec.onresult = (e) => {
+      const t = Array.from(e.results).map(r => r[0].transcript).join(" ");
+      setTranscriptT(t);
+    };
+    rec.onerror = () => setIsRecordingT(false);
+    rec.onend = () => setIsRecordingT(false);
+    recRefT.current = rec;
+    rec.start();
+    setIsRecordingT(true);
+    setTranscriptT("");
+  };
+
+  const stopVoiceT = () => {
+    if (recRefT.current) { recRefT.current.stop(); recRefT.current = null; }
+    setIsRecordingT(false);
+  };
+
+  const extractVoiceT = async () => {
+    if (!transcriptT) return;
+    setIsExtractingT(true);
+    try {
+      const { data } = await supabase.functions.invoke("extract-treatment", { body: { text: transcriptT } });
+      if (data && !data.error) {
+        // Buscar paciente por nombre si se menciona
+        let patientId = form.patientId;
+        if (data.patientName) {
+          const match = patients.find(p => p.name.toLowerCase().includes(data.patientName.toLowerCase().split(" ")[0]));
+          if (match) patientId = String(match.id);
+        }
+        setForm(f => ({
+          patientId: patientId || f.patientId,
+          date: data.date || f.date,
+          procedure: data.procedure || f.procedure,
+          tooth: data.tooth || f.tooth,
+          cost: data.cost != null ? String(data.cost) : f.cost,
+          paid: data.paid != null ? String(data.paid) : f.paid,
+          status: f.status,
+          notes: data.notes || f.notes,
+        }));
+        setTranscriptT("");
+      }
+    } catch (e) { console.error("extractVoiceT error:", e); }
+    setIsExtractingT(false);
   };
 
   const sorted = [...treatments].sort((a, b) => b.date.localeCompare(a.date));
@@ -660,35 +758,150 @@ function TreatmentsView({ treatments, setTreatments, patients }) {
               <div style={{ display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
                 <div>
                   <div style={{ color: COLORS.text, fontWeight: 600 }}>{p?.name} — {t.procedure}</div>
-                  <div style={{ color: COLORS.textMuted, fontSize: 12, marginTop: 2 }}>📅 {formatDate(t.date)}{t.tooth !== "-" ? ` · Pieza ${t.tooth}` : ""}</div>
+                  <div style={{ color: COLORS.textMuted, fontSize: 12, marginTop: 2 }}>📅 {formatDate(t.date)}{t.tooth && t.tooth !== "-" ? ` · Pieza ${t.tooth}` : ""}</div>
                   {t.notes && <div style={{ color: COLORS.textDim, fontSize: 12 }}>{t.notes}</div>}
                 </div>
                 <div style={{ textAlign: "right" }}>
                   <div style={{ color: COLORS.text, fontWeight: 700, fontSize: 16 }}>{formatCLP(t.cost)}</div>
                   <div style={{ fontSize: 12, color: debt > 0 ? COLORS.danger : COLORS.success }}>
-                    {debt > 0 ? `Debe: ${formatCLP(debt)}` : "✓ Pagado"}
+                    {debt > 0 ? `Debe: ${formatCLP(debt)} · Pagado: ${formatCLP(t.paid)}` : "✓ Pagado completo"}
                   </div>
                   <StatusBadge status={t.status} />
                 </div>
               </div>
-              {debt > 0 && (
-                <div style={{ marginTop: 10, display: "flex", gap: 8, flexWrap: "wrap" }}>
-                  {[debt / 2, debt].map((amt, i) => (
-                    <button key={i} onClick={() => registerPayment(t.id, amt)} style={{ background: COLORS.success + "22", color: COLORS.success, border: `1px solid ${COLORS.success}44`, borderRadius: 6, padding: "4px 12px", fontSize: 12, cursor: "pointer", fontWeight: 600 }}>
-                      Registrar {i === 0 ? "50%" : "pago total"} ({formatCLP(amt)})
+              {/* Botones de pago */}
+              <div style={{ marginTop: 10, display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                <button
+                  onClick={() => setEditPayment({ id: t.id, cost: t.cost, paid: t.paid, status: t.status, patientName: p?.name, procedure: t.procedure })}
+                  style={{ background: COLORS.accent + "18", color: COLORS.accent, border: `1px solid ${COLORS.accent}44`, borderRadius: 6, padding: "5px 12px", fontSize: 12, cursor: "pointer", fontWeight: 700 }}>
+                  💳 Editar pago
+                </button>
+                {debt > 0 && (
+                  <>
+                    <button onClick={async () => {
+                      const newPaid = Math.min(t.paid + debt / 2, t.cost);
+                      const newStatus = newPaid >= t.cost ? "completado" : "pendiente pago";
+                      await supabase.from("treatments").update({ paid: newPaid, status: newStatus }).eq("id", t.id);
+                      setTreatments(prev => prev.map(x => x.id === t.id ? { ...x, paid: newPaid, status: newStatus } : x));
+                    }} style={{ background: COLORS.success + "22", color: COLORS.success, border: `1px solid ${COLORS.success}44`, borderRadius: 6, padding: "5px 12px", fontSize: 12, cursor: "pointer", fontWeight: 600 }}>
+                      +50% ({formatCLP(debt / 2)})
                     </button>
-                  ))}
-                </div>
-              )}
+                    <button onClick={async () => {
+                      await supabase.from("treatments").update({ paid: t.cost, status: "completado" }).eq("id", t.id);
+                      setTreatments(prev => prev.map(x => x.id === t.id ? { ...x, paid: t.cost, status: "completado" } : x));
+                    }} style={{ background: COLORS.success + "22", color: COLORS.success, border: `1px solid ${COLORS.success}44`, borderRadius: 6, padding: "5px 12px", fontSize: 12, cursor: "pointer", fontWeight: 600 }}>
+                      Pago total ({formatCLP(debt)})
+                    </button>
+                  </>
+                )}
+              </div>
             </div>
           );
         })}
       </div>
 
+      {/* Modal editar pago */}
+      {editPayment && (
+        <div style={{ position: "fixed", inset: 0, background: "#00000088", zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+          <div style={{ background: COLORS.surface, border: `1px solid ${COLORS.border}`, borderRadius: 16, padding: 28, width: "100%", maxWidth: 420 }}>
+            <h3 style={{ color: COLORS.text, margin: "0 0 6px" }}>💳 Editar Pago</h3>
+            <div style={{ color: COLORS.textMuted, fontSize: 13, marginBottom: 20 }}>{editPayment.patientName} — {editPayment.procedure}</div>
+
+            <div style={{ background: COLORS.bg, borderRadius: 10, padding: "12px 16px", marginBottom: 20 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13 }}>
+                <span style={{ color: COLORS.textMuted }}>Costo total</span>
+                <span style={{ color: COLORS.text, fontWeight: 700 }}>{formatCLP(editPayment.cost)}</span>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, marginTop: 6 }}>
+                <span style={{ color: COLORS.textMuted }}>Por cobrar</span>
+                <span style={{ color: COLORS.danger, fontWeight: 700 }}>{formatCLP(editPayment.cost - editPayment.paid)}</span>
+              </div>
+            </div>
+
+            <div style={{ marginBottom: 16 }}>
+              <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 6 }}>Total pagado hasta ahora ($)</label>
+              <input
+                type="number"
+                value={editPayment.paid}
+                min={0}
+                max={editPayment.cost}
+                onChange={e => setEditPayment(ep => ({ ...ep, paid: e.target.value }))}
+                style={{ ...inputStyle, fontSize: 18, fontWeight: 700, textAlign: "center" }}
+              />
+              <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
+                <button onClick={() => setEditPayment(ep => ({ ...ep, paid: 0 }))}
+                  style={{ flex: 1, background: COLORS.bg, border: `1px solid ${COLORS.border}`, borderRadius: 6, padding: "5px", fontSize: 12, cursor: "pointer", color: COLORS.textMuted }}>
+                  $0
+                </button>
+                <button onClick={() => setEditPayment(ep => ({ ...ep, paid: Math.round(ep.cost / 2) }))}
+                  style={{ flex: 1, background: COLORS.bg, border: `1px solid ${COLORS.border}`, borderRadius: 6, padding: "5px", fontSize: 12, cursor: "pointer", color: COLORS.textMuted }}>
+                  50% ({formatCLP(Math.round(editPayment.cost / 2))})
+                </button>
+                <button onClick={() => setEditPayment(ep => ({ ...ep, paid: ep.cost }))}
+                  style={{ flex: 1, background: "#f0fdf4", border: `1px solid ${COLORS.success}44`, borderRadius: 6, padding: "5px", fontSize: 12, cursor: "pointer", color: COLORS.success, fontWeight: 700 }}>
+                  Total ({formatCLP(editPayment.cost)})
+                </button>
+              </div>
+            </div>
+
+            <div style={{ marginBottom: 20 }}>
+              <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 6 }}>Estado</label>
+              <select value={editPayment.status} onChange={e => setEditPayment(ep => ({ ...ep, status: e.target.value }))} style={inputStyle}>
+                <option value="completado">Completado</option>
+                <option value="pendiente pago">Pendiente de pago</option>
+                <option value="completada">Completada</option>
+              </select>
+            </div>
+
+            <div style={{ display: "flex", gap: 10 }}>
+              <button onClick={savePaymentEdit} style={{ flex: 1, background: COLORS.accent, color: "#fff", border: "none", borderRadius: 8, padding: "11px", fontWeight: 700, cursor: "pointer", fontSize: 15 }}>
+                ✓ Guardar pago
+              </button>
+              <button onClick={() => setEditPayment(null)} style={{ flex: 1, background: COLORS.card, color: COLORS.textMuted, border: `1px solid ${COLORS.border}`, borderRadius: 8, padding: "11px", cursor: "pointer" }}>
+                Cancelar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal nuevo tratamiento */}
       {showForm && (
         <div style={{ position: "fixed", inset: 0, background: "#00000088", zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
           <div style={{ background: COLORS.surface, border: `1px solid ${COLORS.border}`, borderRadius: 16, padding: 28, width: "100%", maxWidth: 480, maxHeight: "90vh", overflowY: "auto" }}>
-            <h3 style={{ color: COLORS.text, margin: "0 0 20px" }}>Nuevo Tratamiento</h3>
+            <h3 style={{ color: COLORS.text, margin: "0 0 16px" }}>Nuevo Tratamiento</h3>
+
+            {/* Voz para tratamiento */}
+            <div style={{ background: "#eff6ff", border: "1px dashed #93c5fd", borderRadius: 10, padding: 12, marginBottom: 18 }}>
+              <div style={{ color: COLORS.accent, fontSize: 12, fontWeight: 700, marginBottom: 8 }}>🎤 Dictar tratamiento por voz</div>
+              <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                <button onClick={isRecordingT ? stopVoiceT : startVoiceT}
+                  style={{ background: isRecordingT ? COLORS.danger : COLORS.accent, color: "#fff", border: "none", borderRadius: 8, padding: "8px 16px", fontWeight: 700, cursor: "pointer", fontSize: 13 }}>
+                  {isRecordingT ? "⏹ Detener" : "🎤 Grabar"}
+                </button>
+                {isRecordingT && <span style={{ color: COLORS.danger, fontSize: 12, fontWeight: 700 }}>⬤ Grabando...</span>}
+              </div>
+              {transcriptT && isRecordingT && (
+                <div style={{ marginTop: 8, color: COLORS.textMuted, fontSize: 12, fontStyle: "italic", background: "#fff", borderRadius: 8, padding: "6px 10px" }}>"{transcriptT}"</div>
+              )}
+              {transcriptT && !isRecordingT && (
+                <div style={{ marginTop: 10 }}>
+                  <div style={{ background: "#fff", border: "1px solid #bfdbfe", borderRadius: 8, padding: "8px 12px", color: COLORS.text, fontSize: 13, marginBottom: 8, fontStyle: "italic" }}>"{transcriptT}"</div>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <button onClick={extractVoiceT} disabled={isExtractingT}
+                      style={{ background: COLORS.accent, color: "#fff", border: "none", borderRadius: 8, padding: "7px 14px", fontSize: 13, fontWeight: 700, cursor: isExtractingT ? "not-allowed" : "pointer", opacity: isExtractingT ? 0.7 : 1 }}>
+                      {isExtractingT ? "⏳ Extrayendo..." : "✨ Rellenar formulario"}
+                    </button>
+                    <button onClick={() => setTranscriptT("")}
+                      style={{ background: "none", border: `1px solid ${COLORS.border}`, color: COLORS.textMuted, borderRadius: 8, padding: "7px 12px", fontSize: 13, cursor: "pointer" }}>
+                      × Descartar
+                    </button>
+                  </div>
+                </div>
+              )}
+              <div style={{ color: COLORS.textDim, fontSize: 11, marginTop: 6 }}>Ej: "Paciente Juan Pérez, limpieza dental, costo cincuenta mil, pagó veinte mil"</div>
+            </div>
+
             <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
               {[
                 { label: "Paciente", key: "patientId", type: "select", options: patients.map(p => ({ value: p.id, label: p.name })) },
