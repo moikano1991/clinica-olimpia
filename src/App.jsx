@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { supabase } from "./supabase";
 import * as XLSX from "xlsx";
 
@@ -269,6 +269,12 @@ function PatientsView({ patients, setPatients, appointments, treatments, selecte
   const [editForm, setEditForm] = useState({ name: "", rut: "", phone: "", email: "", dob: "", address: "", notes: "" });
   const [detail, setDetail] = useState(selectedPatient || null);
 
+  // Voz
+  const [isRecording, setIsRecording] = useState(false);
+  const [transcript, setTranscript] = useState("");
+  const [isExtracting, setIsExtracting] = useState(false);
+  const recRef = useRef(null);
+
   useEffect(() => { if (selectedPatient) setDetail(selectedPatient); }, [selectedPatient]);
 
   const normalizeRut = (r) => (r || "").replace(/[.\-]/g, "").toLowerCase();
@@ -319,6 +325,51 @@ function PatientsView({ patients, setPatients, appointments, treatments, selecte
       address: addressLine || f.address,
       notes: notesLine || f.notes,
     }));
+  };
+
+  const startVoice = () => {
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) { alert("El reconocimiento de voz solo funciona en Chrome o Edge. Intenta con otro navegador."); return; }
+    const rec = new SR();
+    rec.lang = "es-CL";
+    rec.continuous = true;
+    rec.interimResults = true;
+    rec.onresult = (e) => {
+      const t = Array.from(e.results).map(r => r[0].transcript).join(" ");
+      setTranscript(t);
+    };
+    rec.onerror = () => setIsRecording(false);
+    rec.onend = () => setIsRecording(false);
+    recRef.current = rec;
+    rec.start();
+    setIsRecording(true);
+    setTranscript("");
+  };
+
+  const stopVoice = () => {
+    if (recRef.current) { recRef.current.stop(); recRef.current = null; }
+    setIsRecording(false);
+  };
+
+  const extractVoice = async () => {
+    if (!transcript) return;
+    setIsExtracting(true);
+    try {
+      const { data } = await supabase.functions.invoke("extract-patient", { body: { text: transcript } });
+      if (data && !data.error) {
+        setForm(f => ({
+          name: data.name || f.name,
+          rut: data.rut || f.rut,
+          phone: data.phone || f.phone,
+          email: data.email || f.email,
+          dob: data.dob || f.dob,
+          address: data.address || f.address,
+          notes: data.notes || f.notes,
+        }));
+        setTranscript("");
+      }
+    } catch (e) { console.error("extractVoice error:", e); }
+    setIsExtracting(false);
   };
 
   const updatePatient = async (id) => {
@@ -457,6 +508,10 @@ function PatientsView({ patients, setPatients, appointments, treatments, selecte
           style={{ background: "#25D36622", color: "#16a34a", border: "1.5px solid #86efac", borderRadius: 8, padding: "8px 14px", fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap", fontSize: 13 }}>
           📋 Pegar WhatsApp
         </button>
+        <button onClick={() => { setShowForm(true); }}
+          style={{ background: "#eff6ff", color: COLORS.accent, border: `1.5px solid #93c5fd`, borderRadius: 8, padding: "8px 14px", fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap", fontSize: 13 }}>
+          🎤 Voz
+        </button>
       </div>
 
       <div style={{ color: COLORS.textDim, fontSize: 12, marginBottom: 14 }}>
@@ -486,6 +541,40 @@ function PatientsView({ patients, setPatients, appointments, treatments, selecte
         <div style={{ position: "fixed", inset: 0, background: "#00000088", zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
           <div style={{ background: COLORS.surface, border: `1px solid ${COLORS.border}`, borderRadius: 16, padding: 28, width: "100%", maxWidth: 480, maxHeight: "90vh", overflowY: "auto" }}>
             <h3 style={{ color: COLORS.text, margin: "0 0 16px" }}>Nuevo Paciente</h3>
+
+            {/* Dictar por voz */}
+            <div style={{ background: "#eff6ff", border: "1px dashed #93c5fd", borderRadius: 10, padding: 12, marginBottom: 12 }}>
+              <div style={{ color: COLORS.accent, fontSize: 12, fontWeight: 700, marginBottom: 8 }}>🎤 Dictar datos por voz</div>
+              <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                <button
+                  onClick={isRecording ? stopVoice : startVoice}
+                  style={{ background: isRecording ? COLORS.danger : COLORS.accent, color: "#fff", border: "none", borderRadius: 8, padding: "8px 16px", fontWeight: 700, cursor: "pointer", fontSize: 13, display: "flex", alignItems: "center", gap: 6 }}>
+                  {isRecording ? "⏹ Detener" : "🎤 Grabar"}
+                </button>
+                {isRecording && <span style={{ color: COLORS.danger, fontSize: 12, fontWeight: 700 }}>⬤ Grabando...</span>}
+              </div>
+              {transcript && isRecording && (
+                <div style={{ marginTop: 8, color: COLORS.textMuted, fontSize: 12, fontStyle: "italic", background: "#fff", borderRadius: 8, padding: "6px 10px" }}>"{transcript}"</div>
+              )}
+              {transcript && !isRecording && (
+                <div style={{ marginTop: 10 }}>
+                  <div style={{ background: "#fff", border: "1px solid #bfdbfe", borderRadius: 8, padding: "8px 12px", color: COLORS.text, fontSize: 13, marginBottom: 8, fontStyle: "italic" }}>
+                    "{transcript}"
+                  </div>
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    <button onClick={extractVoice} disabled={isExtracting}
+                      style={{ background: COLORS.accent, color: "#fff", border: "none", borderRadius: 8, padding: "7px 14px", fontSize: 13, fontWeight: 700, cursor: isExtracting ? "not-allowed" : "pointer", opacity: isExtracting ? 0.7 : 1 }}>
+                      {isExtracting ? "⏳ Extrayendo..." : "✨ Rellenar formulario"}
+                    </button>
+                    <button onClick={() => setTranscript("")}
+                      style={{ background: "none", border: `1px solid ${COLORS.border}`, color: COLORS.textMuted, borderRadius: 8, padding: "7px 12px", fontSize: 13, cursor: "pointer" }}>
+                      × Descartar
+                    </button>
+                  </div>
+                </div>
+              )}
+              <div style={{ color: COLORS.textDim, fontSize: 11, marginTop: 6 }}>Solo funciona en Chrome o Edge. Ej: "El paciente es Juan Pérez, RUT 12.345.678-9, teléfono 56912345678"</div>
+            </div>
 
             {/* Pegar desde WhatsApp */}
             <div style={{ background: "#25D36611", border: "1px dashed #25D36644", borderRadius: 10, padding: 12, marginBottom: 18 }}>
