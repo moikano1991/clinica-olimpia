@@ -268,6 +268,7 @@ function PatientsView({ patients, setPatients, appointments, treatments, selecte
   const [form, setForm] = useState({ name: "", rut: "", phone: "", email: "", dob: "", address: "", notes: "" });
   const [editForm, setEditForm] = useState({ name: "", rut: "", phone: "", email: "", dob: "", address: "", notes: "" });
   const [detail, setDetail] = useState(selectedPatient || null);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   // Voz
   const [isRecording, setIsRecording] = useState(false);
@@ -372,6 +373,19 @@ function PatientsView({ patients, setPatients, appointments, treatments, selecte
     setIsExtracting(false);
   };
 
+  const deletePatient = async (id) => {
+    // Eliminar en orden: tratamientos → citas → paciente
+    await supabase.from("treatments").delete().eq("patient_id", id);
+    await supabase.from("appointments").delete().eq("patient_id", id);
+    const { error } = await supabase.from("patients").delete().eq("id", id);
+    if (!error) {
+      setPatients(prev => prev.filter(p => p.id !== id));
+      setShowDeleteConfirm(false);
+      setDetail(null);
+      setSelectedPatient(null);
+    }
+  };
+
   const updatePatient = async (id) => {
     if (!editForm.name) return;
     const { data, error } = await supabase.from("patients").update({
@@ -426,6 +440,10 @@ function PatientsView({ patients, setPatients, appointments, treatments, selecte
                 style={{ background: COLORS.accent + "22", color: COLORS.accent, border: `1px solid ${COLORS.accent}44`, borderRadius: 8, padding: "6px 14px", fontSize: 13, cursor: "pointer", fontWeight: 600 }}>
                 ✏️ Editar
               </button>
+              <button onClick={() => setShowDeleteConfirm(true)}
+                style={{ background: COLORS.danger + "15", color: COLORS.danger, border: `1px solid ${COLORS.danger}44`, borderRadius: 8, padding: "6px 14px", fontSize: 13, cursor: "pointer", fontWeight: 600 }}>
+                🗑 Eliminar
+              </button>
             </div>
           </div>
         </div>
@@ -476,6 +494,37 @@ function PatientsView({ patients, setPatients, appointments, treatments, selecte
               <div style={{ display: "flex", gap: 10, marginTop: 20 }}>
                 <button onClick={() => updatePatient(p.id)} style={{ flex: 1, background: COLORS.accent, color: "#fff", border: "none", borderRadius: 8, padding: "10px", fontWeight: 700, cursor: "pointer" }}>Guardar cambios</button>
                 <button onClick={() => setShowEditForm(false)} style={{ flex: 1, background: COLORS.card, color: COLORS.textMuted, border: `1px solid ${COLORS.border}`, borderRadius: 8, padding: "10px", cursor: "pointer" }}>Cancelar</button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Modal confirmar eliminación */}
+        {showDeleteConfirm && (
+          <div style={{ position: "fixed", inset: 0, background: "#00000099", zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+            <div style={{ background: COLORS.surface, border: `2px solid ${COLORS.danger}44`, borderRadius: 16, padding: 28, width: "100%", maxWidth: 420 }}>
+              <div style={{ textAlign: "center", marginBottom: 20 }}>
+                <div style={{ fontSize: 48, marginBottom: 8 }}>⚠️</div>
+                <h3 style={{ color: COLORS.danger, margin: "0 0 8px", fontSize: 18 }}>Eliminar paciente</h3>
+                <div style={{ color: COLORS.text, fontWeight: 700, fontSize: 16, marginBottom: 12 }}>{p.name}</div>
+                {(pAppts.length > 0 || pTreat.length > 0) && (
+                  <div style={{ background: "#fff1f2", border: `1px solid ${COLORS.danger}33`, borderRadius: 10, padding: "10px 14px", marginBottom: 12, textAlign: "left" }}>
+                    <div style={{ color: COLORS.danger, fontWeight: 700, fontSize: 13, marginBottom: 6 }}>Se eliminarán también:</div>
+                    {pAppts.length > 0 && <div style={{ color: COLORS.textMuted, fontSize: 13 }}>📅 {pAppts.length} cita{pAppts.length !== 1 ? "s" : ""}</div>}
+                    {pTreat.length > 0 && <div style={{ color: COLORS.textMuted, fontSize: 13 }}>🦷 {pTreat.length} tratamiento{pTreat.length !== 1 ? "s" : ""} e historial clínico</div>}
+                  </div>
+                )}
+                <div style={{ color: COLORS.textMuted, fontSize: 13 }}>Esta acción no se puede deshacer.</div>
+              </div>
+              <div style={{ display: "flex", gap: 10 }}>
+                <button onClick={() => deletePatient(p.id)}
+                  style={{ flex: 1, background: COLORS.danger, color: "#fff", border: "none", borderRadius: 8, padding: "11px", fontWeight: 700, cursor: "pointer", fontSize: 14 }}>
+                  Sí, eliminar
+                </button>
+                <button onClick={() => setShowDeleteConfirm(false)}
+                  style={{ flex: 1, background: COLORS.card, color: COLORS.textMuted, border: `1px solid ${COLORS.border}`, borderRadius: 8, padding: "11px", cursor: "pointer", fontSize: 14 }}>
+                  Cancelar
+                </button>
               </div>
             </div>
           </div>
