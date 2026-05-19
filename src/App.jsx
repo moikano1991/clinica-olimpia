@@ -57,7 +57,7 @@ function WhatsAppBtn({ phone, message }) {
   );
 }
 
-function AgendaView({ appointments, patients, setAppointments, setView, setSelectedPatient, initialDate, initialFilter }) {
+function AgendaView({ appointments, patients, setAppointments, setView, setSelectedPatient, initialDate, initialFilter, syncGCal }) {
   const [selectedDate, setSelectedDate] = useState(initialDate || today());
   const [filterStatus, setFilterStatus] = useState(initialFilter || "");
   const [showForm, setShowForm] = useState(false);
@@ -84,15 +84,25 @@ function AgendaView({ appointments, patients, setAppointments, setView, setSelec
       dentist: form.dentist, notes: form.notes, status: form.status,
     }]).select().single();
     if (!error) {
-      setAppointments(prev => [...prev, toAppt(data)]);
+      const appt = toAppt(data);
+      setAppointments(prev => [...prev, appt]);
       setShowForm(false);
       setSelectedDate(form.date);
+      // Sincronizar con Google Calendar
+      const p = patients.find(pt => pt.id === Number(form.patientId));
+      syncGCal?.("create", { ...appt, patientName: p?.name || "Paciente" });
     }
   };
 
   const updateStatus = async (id, status) => {
     await supabase.from("appointments").update({ status }).eq("id", id);
     setAppointments(prev => prev.map(a => a.id === id ? { ...a, status } : a));
+    // Sincronizar cambio de estado
+    const appt = appointments.find(a => a.id === id);
+    if (appt) {
+      const p = patients.find(pt => pt.id === appt.patientId);
+      syncGCal?.("update", { ...appt, status, patientName: p?.name || "Paciente" });
+    }
   };
 
   const buildWAMessage = (appt) => {
@@ -1496,6 +1506,8 @@ export default function App() {
   const [session, setSession] = useState(null);
   const [copied, setCopied] = useState(false);
   const [agendaConfig, setAgendaConfig] = useState({ filter: "", date: today() });
+  const [gcalConnected, setGcalConnected] = useState(false);
+  const [gcalSyncing, setGcalSyncing] = useState(false);
 
   const shareLink = `${window.location.origin}${window.location.pathname}registro/`;
   const copyLink = () => {
@@ -1534,6 +1546,49 @@ export default function App() {
   const handleLogout = async () => {
     await supabase.auth.signOut();
     setPatients([]); setAppointments([]); setTreatments([]);
+  };
+
+  // ── Google Calendar ────────────────────────────────────────────────
+  useEffect(() => {
+    // Detectar retorno exitoso de OAuth
+    if (window.location.hash === "#gcal=ok") {
+      setGcalConnected(true);
+      window.history.replaceState(null, "", window.location.pathname);
+      alert("✅ Google Calendar conectado correctamente. Las citas se sincronizarán automáticamente.");
+    }
+    // Verificar si ya está conectado
+    supabase.functions.invoke("google-calendar", {
+      headers: { "x-action": "check" },
+    }).then(({ data }) => {
+      if (data?.connected) setGcalConnected(true);
+    }).catch(() => {});
+
+    fetch(`https://fiqxqmuczsmtsfwgggvj.supabase.co/functions/v1/google-calendar?action=check`, {
+      headers: {
+        apikey: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZpcXhxbXVjenNtdHNmd2dnZ3ZqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg3ODcxNDYsImV4cCI6MjA5NDM2MzE0Nn0.TF8lCdD5MysSbi_pCTe6ICoBx_qpHIe2kAejDTzi9Gg",
+      }
+    }).then(r => r.json()).then(d => { if (d.connected) setGcalConnected(true); }).catch(() => {});
+  }, []);
+
+  const connectGCal = async () => {
+    const res = await fetch(
+      "https://fiqxqmuczsmtsfwgggvj.supabase.co/functions/v1/google-calendar?action=auth_url",
+      { headers: { apikey: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZpcXhxbXVjenNtdHNmd2dnZ3ZqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg3ODcxNDYsImV4cCI6MjA5NDM2MzE0Nn0.TF8lCdD5MysSbi_pCTe6ICoBx_qpHIe2kAejDTzi9Gg" } }
+    );
+    const { url, error } = await res.json();
+    if (error) { alert("Error: " + error); return; }
+    window.open(url, "_self");
+  };
+
+  const syncGCal = async (action, appointment) => {
+    if (!gcalConnected) return;
+    setGcalSyncing(true);
+    try {
+      await supabase.functions.invoke("google-calendar", {
+        body: { action, appointment },
+      });
+    } catch (e) { console.error("GCal sync error:", e); }
+    setGcalSyncing(false);
   };
 
   const exportarExcel = () => {
@@ -1646,6 +1701,13 @@ export default function App() {
 
         {/* Footer sidebar */}
         <div style={{ padding: "16px 12px", borderTop: "1px solid #2a4f8844", display: "flex", flexDirection: "column", gap: 8 }}>
+          <button onClick={gcalConnected ? undefined : connectGCal}
+            style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 14px", borderRadius: 10, border: "none", background: gcalConnected ? "#14532d44" : "transparent", color: gcalConnected ? "#4ade80" : COLORS.sidebarText, cursor: gcalConnected ? "default" : "pointer", fontSize: 12, textAlign: "left", width: "100%" }}
+            onMouseEnter={e => { if (!gcalConnected) e.currentTarget.style.background = "#2a4f9644"; }}
+            onMouseLeave={e => { if (!gcalConnected) e.currentTarget.style.background = "transparent"; }}>
+            <span>{gcalConnected ? "✓" : "📆"}</span>
+            {gcalConnected ? (gcalSyncing ? "Sincronizando..." : "Google Calendar ✓") : "Conectar Google Cal"}
+          </button>
           <button onClick={exportarExcel}
             style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 14px", borderRadius: 10, border: "none", background: "transparent", color: COLORS.sidebarText, cursor: "pointer", fontSize: 12, textAlign: "left", width: "100%" }}
             onMouseEnter={e => e.currentTarget.style.background = "#2a4f9644"}
@@ -1695,7 +1757,7 @@ export default function App() {
         {/* Vistas */}
         <div style={{ padding: "28px 28px", flex: 1, maxWidth: 900, width: "100%" }}>
           {view === "dashboard"   && <DashboardView appointments={appointments} treatments={treatments} patients={patients} setView={setView} setAgendaConfig={setAgendaConfig} />}
-          {view === "agenda"      && <AgendaView key={agendaConfig.date + agendaConfig.filter} appointments={appointments} patients={patients} setAppointments={setAppointments} setView={setView} setSelectedPatient={setSelectedPatient} initialDate={agendaConfig.date} initialFilter={agendaConfig.filter} />}
+          {view === "agenda"      && <AgendaView key={agendaConfig.date + agendaConfig.filter} appointments={appointments} patients={patients} setAppointments={setAppointments} setView={setView} setSelectedPatient={setSelectedPatient} initialDate={agendaConfig.date} initialFilter={agendaConfig.filter} syncGCal={syncGCal} />}
           {view === "patients"    && <PatientsView patients={patients} setPatients={setPatients} appointments={appointments} treatments={treatments} selectedPatient={selectedPatient} setSelectedPatient={setSelectedPatient} />}
           {view === "treatments"  && <TreatmentsView treatments={treatments} setTreatments={setTreatments} patients={patients} />}
           {view === "performance" && <PerformanceView appointments={appointments} treatments={treatments} patients={patients} />}
