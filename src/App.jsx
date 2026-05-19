@@ -1701,12 +1701,16 @@ export default function App() {
 
         {/* Footer sidebar */}
         <div style={{ padding: "16px 12px", borderTop: "1px solid #2a4f8844", display: "flex", flexDirection: "column", gap: 8 }}>
-          <button onClick={gcalConnected ? undefined : connectGCal}
-            style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 14px", borderRadius: 10, border: "none", background: gcalConnected ? "#14532d44" : "transparent", color: gcalConnected ? "#4ade80" : COLORS.sidebarText, cursor: gcalConnected ? "default" : "pointer", fontSize: 12, textAlign: "left", width: "100%" }}
-            onMouseEnter={e => { if (!gcalConnected) e.currentTarget.style.background = "#2a4f9644"; }}
-            onMouseLeave={e => { if (!gcalConnected) e.currentTarget.style.background = "transparent"; }}>
-            <span>{gcalConnected ? "✓" : "📆"}</span>
-            {gcalConnected ? (gcalSyncing ? "Sincronizando..." : "Google Calendar ✓") : "Conectar Google Cal"}
+          <button onClick={() => {
+              const url = "https://fiqxqmuczsmtsfwgggvj.supabase.co/functions/v1/calendar-ics?token=olimpia2026";
+              const gcalUrl = `https://calendar.google.com/calendar/r?cid=${encodeURIComponent(url)}`;
+              navigator.clipboard.writeText(url);
+              window.open(gcalUrl, "_blank");
+            }}
+            style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 14px", borderRadius: 10, border: "none", background: "transparent", color: COLORS.sidebarText, cursor: "pointer", fontSize: 12, textAlign: "left", width: "100%" }}
+            onMouseEnter={e => e.currentTarget.style.background = "#2a4f9644"}
+            onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+            <span>📆</span> Abrir en Google Cal
           </button>
           <button onClick={exportarExcel}
             style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 14px", borderRadius: 10, border: "none", background: "transparent", color: COLORS.sidebarText, cursor: "pointer", fontSize: 12, textAlign: "left", width: "100%" }}
