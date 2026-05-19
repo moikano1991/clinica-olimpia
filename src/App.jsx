@@ -57,7 +57,7 @@ function WhatsAppBtn({ phone, message }) {
   );
 }
 
-function AgendaView({ appointments, patients, setAppointments, setView, setSelectedPatient, initialDate, initialFilter, syncGCal }) {
+function AgendaView({ appointments, patients, setAppointments, setView, setSelectedPatient, initialDate, initialFilter, syncGCal, gcalConnected, connectGCal }) {
   const [selectedDate, setSelectedDate] = useState(initialDate || today());
   const [filterStatus, setFilterStatus] = useState(initialFilter || "");
   const [showForm, setShowForm] = useState(false);
@@ -185,9 +185,18 @@ function AgendaView({ appointments, patients, setAppointments, setView, setSelec
         ))}
       </div>
 
-      <div style={{ marginBottom: 16, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+      <div style={{ marginBottom: 16, display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
         <h3 style={{ color: COLORS.text, margin: 0, fontSize: 16 }}>📅 {formatDate(selectedDate)} — {dayAppts.length} cita{dayAppts.length !== 1 ? "s" : ""}</h3>
-        <button onClick={() => setShowForm(true)} style={{ background: COLORS.accent, color: "#fff", border: "none", borderRadius: 8, padding: "8px 16px", fontWeight: 700, cursor: "pointer", fontSize: 13 }}>+ Nueva cita</button>
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          {gcalConnected ? (
+            <span style={{ fontSize: 12, color: "#34d399", background: "#16423044", padding: "6px 12px", borderRadius: 8, fontWeight: 600 }}>✅ Google Cal</span>
+          ) : (
+            <button onClick={connectGCal} style={{ background: "#fff", color: "#1a73e8", border: "1px solid #1a73e8", borderRadius: 8, padding: "7px 14px", fontWeight: 600, cursor: "pointer", fontSize: 12, display: "flex", alignItems: "center", gap: 6 }}>
+              <span>📆</span> Conectar Google Cal
+            </button>
+          )}
+          <button onClick={() => setShowForm(true)} style={{ background: COLORS.accent, color: "#fff", border: "none", borderRadius: 8, padding: "8px 16px", fontWeight: 700, cursor: "pointer", fontSize: 13 }}>+ Nueva cita</button>
+        </div>
       </div>
 
       {dayAppts.length === 0 ? (
@@ -1757,7 +1766,7 @@ export default function App() {
         {/* Vistas */}
         <div style={{ padding: "28px 28px", flex: 1, maxWidth: 900, width: "100%" }}>
           {view === "dashboard"   && <DashboardView appointments={appointments} treatments={treatments} patients={patients} setView={setView} setAgendaConfig={setAgendaConfig} />}
-          {view === "agenda"      && <AgendaView key={agendaConfig.date + agendaConfig.filter} appointments={appointments} patients={patients} setAppointments={setAppointments} setView={setView} setSelectedPatient={setSelectedPatient} initialDate={agendaConfig.date} initialFilter={agendaConfig.filter} syncGCal={syncGCal} />}
+          {view === "agenda"      && <AgendaView key={agendaConfig.date + agendaConfig.filter} appointments={appointments} patients={patients} setAppointments={setAppointments} setView={setView} setSelectedPatient={setSelectedPatient} initialDate={agendaConfig.date} initialFilter={agendaConfig.filter} syncGCal={syncGCal} gcalConnected={gcalConnected} connectGCal={connectGCal} />}
           {view === "patients"    && <PatientsView patients={patients} setPatients={setPatients} appointments={appointments} treatments={treatments} selectedPatient={selectedPatient} setSelectedPatient={setSelectedPatient} />}
           {view === "treatments"  && <TreatmentsView treatments={treatments} setTreatments={setTreatments} patients={patients} />}
           {view === "performance" && <PerformanceView appointments={appointments} treatments={treatments} patients={patients} />}
