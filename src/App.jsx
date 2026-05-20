@@ -62,6 +62,9 @@ function AgendaView({ appointments, patients, setAppointments, setView, setSelec
   const [filterStatus, setFilterStatus] = useState(initialFilter || "");
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({ patientId: "", date: initialDate || today(), time: "09:00", duration: 60, treatment: "Limpieza dental", dentist: "Dra. María Florencia Muñoz", notes: "", status: "pendiente" });
+  const [patientSearch, setPatientSearch] = useState("");
+  const [patientSuggestions, setPatientSuggestions] = useState([]);
+  const [filterPatientId, setFilterPatientId] = useState(null); // null = todos
 
   // Mes visible en el calendario
   const [calMonth, setCalMonth] = useState(() => {
@@ -71,10 +74,37 @@ function AgendaView({ appointments, patients, setAppointments, setView, setSelec
 
   const getPatient = (id) => patients.find(p => p.id === Number(id));
 
-  // Citas del día seleccionado (con filtro opcional de estado)
+  // Citas del día seleccionado (con filtro de estado y paciente)
   const dayAppts = appointments
-    .filter(a => a.date === selectedDate && (!filterStatus || a.status === filterStatus))
+    .filter(a => a.date === selectedDate
+      && (!filterStatus || a.status === filterStatus)
+      && (!filterPatientId || a.patientId === filterPatientId))
     .sort((a, b) => a.time.localeCompare(b.time));
+
+  // Handler búsqueda de paciente
+  const handlePatientSearch = (val) => {
+    setPatientSearch(val);
+    if (!val.trim()) { setPatientSuggestions([]); setFilterPatientId(null); return; }
+    const q = val.toLowerCase().replace(/\./g, "").replace(/-/g, "");
+    const matches = patients.filter(p => {
+      const nameMatch = p.name?.toLowerCase().includes(q);
+      const rutMatch = p.rut?.replace(/\./g, "").replace(/-/g, "").toLowerCase().includes(q);
+      return nameMatch || rutMatch;
+    }).slice(0, 6);
+    setPatientSuggestions(matches);
+  };
+
+  const selectPatient = (p) => {
+    setPatientSearch(p.name);
+    setFilterPatientId(p.id);
+    setPatientSuggestions([]);
+  };
+
+  const clearPatientFilter = () => {
+    setPatientSearch("");
+    setFilterPatientId(null);
+    setPatientSuggestions([]);
+  };
 
   const saveAppt = async () => {
     if (!form.patientId || !form.date || !form.time) return;
@@ -159,7 +189,7 @@ function AgendaView({ appointments, patients, setAppointments, setView, setSelec
       <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 3, marginBottom: 20 }}>
         {calCells.map((dateStr, i) => {
           if (!dateStr) return <div key={i} />;
-          const count = appointments.filter(a => a.date === dateStr && (!filterStatus || a.status === filterStatus)).length;
+          const count = appointments.filter(a => a.date === dateStr && (!filterStatus || a.status === filterStatus) && (!filterPatientId || a.patientId === filterPatientId)).length;
           const isToday = dateStr === today();
           const isSelected = dateStr === selectedDate;
           const isSunday = (i % 7) === 6;
@@ -175,6 +205,35 @@ function AgendaView({ appointments, patients, setAppointments, setView, setSelec
         })}
       </div>
 
+      {/* Buscador de paciente */}
+      <div style={{ position: "relative", marginBottom: 12 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, background: COLORS.card, border: `1px solid ${filterPatientId ? COLORS.accent : COLORS.border}`, borderRadius: 10, padding: "8px 12px" }}>
+          <span style={{ fontSize: 15, color: COLORS.textMuted }}>🔍</span>
+          <input
+            value={patientSearch}
+            onChange={e => handlePatientSearch(e.target.value)}
+            placeholder="Buscar paciente por nombre o RUT…"
+            style={{ flex: 1, border: "none", background: "transparent", outline: "none", fontSize: 13, color: COLORS.text }}
+          />
+          {filterPatientId && (
+            <button onClick={clearPatientFilter} style={{ background: COLORS.accent + "22", border: "none", borderRadius: 6, color: COLORS.accent, cursor: "pointer", fontSize: 11, fontWeight: 700, padding: "2px 8px" }}>✕ Limpiar</button>
+          )}
+        </div>
+        {patientSuggestions.length > 0 && (
+          <div style={{ position: "absolute", top: "100%", left: 0, right: 0, background: COLORS.card, border: `1px solid ${COLORS.border}`, borderRadius: 10, zIndex: 50, boxShadow: "0 4px 16px rgba(0,0,0,0.12)", overflow: "hidden", marginTop: 4 }}>
+            {patientSuggestions.map(p => (
+              <div key={p.id} onClick={() => selectPatient(p)}
+                style={{ padding: "10px 14px", cursor: "pointer", borderBottom: `1px solid ${COLORS.border}`, display: "flex", justifyContent: "space-between", alignItems: "center" }}
+                onMouseEnter={e => e.currentTarget.style.background = COLORS.accent + "11"}
+                onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+                <span style={{ fontWeight: 600, color: COLORS.text, fontSize: 13 }}>{p.name}</span>
+                {p.rut && <span style={{ fontSize: 11, color: COLORS.textMuted }}>{p.rut}</span>}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
       {/* Filtros de estado */}
       <div style={{ display: "flex", gap: 6, marginBottom: 14, flexWrap: "wrap" }}>
         {statusFilters.map(f => (
@@ -186,7 +245,10 @@ function AgendaView({ appointments, patients, setAppointments, setView, setSelec
       </div>
 
       <div style={{ marginBottom: 16, display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
-        <h3 style={{ color: COLORS.text, margin: 0, fontSize: 16 }}>📅 {formatDate(selectedDate)} — {dayAppts.length} cita{dayAppts.length !== 1 ? "s" : ""}</h3>
+        <h3 style={{ color: COLORS.text, margin: 0, fontSize: 16 }}>
+          📅 {formatDate(selectedDate)} — {dayAppts.length} cita{dayAppts.length !== 1 ? "s" : ""}
+          {filterPatientId && <span style={{ fontSize: 12, fontWeight: 600, color: COLORS.accent, marginLeft: 8 }}>· {patientSearch}</span>}
+        </h3>
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
           {gcalConnected ? (
             <span style={{ fontSize: 12, color: "#34d399", background: "#16423044", padding: "6px 12px", borderRadius: 8, fontWeight: 600 }}>✅ Google Cal</span>
