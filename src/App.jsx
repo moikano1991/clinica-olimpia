@@ -65,6 +65,8 @@ function AgendaView({ appointments, patients, setAppointments, setView, setSelec
   const [patientSearch, setPatientSearch] = useState("");
   const [patientSuggestions, setPatientSuggestions] = useState([]);
   const [filterPatientId, setFilterPatientId] = useState(null); // null = todos
+  const [editAppt, setEditAppt] = useState(null); // cita siendo editada
+  const [editForm, setEditForm] = useState({});
 
   // Mes visible en el calendario
   const [calMonth, setCalMonth] = useState(() => {
@@ -133,6 +135,50 @@ function AgendaView({ appointments, patients, setAppointments, setView, setSelec
       const p = patients.find(pt => pt.id === appt.patientId);
       syncGCal?.("update", { ...appt, status, patientName: p?.name || "Paciente" });
     }
+  };
+
+  const openEdit = (appt) => {
+    setEditAppt(appt);
+    setEditForm({
+      patientId: String(appt.patientId),
+      date: appt.date,
+      time: appt.time,
+      duration: appt.duration || 60,
+      treatment: appt.treatment,
+      dentist: appt.dentist || "Dra. María Florencia Muñoz",
+      notes: appt.notes || "",
+      status: appt.status,
+    });
+  };
+
+  const saveEdit = async () => {
+    if (!editAppt) return;
+    const updates = {
+      patient_id: Number(editForm.patientId),
+      date: editForm.date,
+      time: editForm.time,
+      duration: Number(editForm.duration),
+      treatment: editForm.treatment,
+      dentist: editForm.dentist,
+      notes: editForm.notes,
+      status: editForm.status,
+    };
+    const { error } = await supabase.from("appointments").update(updates).eq("id", editAppt.id);
+    if (!error) {
+      const updated = { ...editAppt, ...updates, patientId: Number(editForm.patientId) };
+      setAppointments(prev => prev.map(a => a.id === editAppt.id ? updated : a));
+      const p = patients.find(pt => pt.id === Number(editForm.patientId));
+      syncGCal?.("update", { ...updated, patientName: p?.name || "Paciente" });
+      setEditAppt(null);
+      setSelectedDate(editForm.date);
+    }
+  };
+
+  const deleteAppt = async (appt) => {
+    if (!window.confirm(`¿Eliminar cita de ${getPatient(appt.patientId)?.name || "este paciente"} el ${formatDate(appt.date)} a las ${appt.time}?`)) return;
+    await supabase.from("appointments").delete().eq("id", appt.id);
+    setAppointments(prev => prev.filter(a => a.id !== appt.id));
+    syncGCal?.("delete", appt);
   };
 
   const buildWAMessage = (appt) => {
@@ -296,11 +342,57 @@ function AgendaView({ appointments, patients, setAppointments, setView, setSelec
                       )}
                     </div>
                     {p?.phone && <WhatsAppBtn phone={p.phone} message={buildWAMessage(appt)} />}
+                    <div style={{ display: "flex", gap: 6 }}>
+                      <button onClick={() => openEdit(appt)} style={{ background: COLORS.accent + "18", color: COLORS.accent, border: `1px solid ${COLORS.accent}44`, borderRadius: 6, padding: "4px 10px", fontSize: 11, cursor: "pointer", fontWeight: 600 }}>✏️ Editar</button>
+                      <button onClick={() => deleteAppt(appt)} style={{ background: COLORS.danger + "18", color: COLORS.danger, border: `1px solid ${COLORS.danger}44`, borderRadius: 6, padding: "4px 10px", fontSize: 11, cursor: "pointer", fontWeight: 600 }}>🗑 Eliminar</button>
+                    </div>
                   </div>
                 </div>
               </div>
             );
           })}
+        </div>
+      )}
+
+      {/* Modal editar cita */}
+      {editAppt && (
+        <div style={{ position: "fixed", inset: 0, background: "#00000088", zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+          <div style={{ background: COLORS.surface, border: `1px solid ${COLORS.border}`, borderRadius: 16, padding: 28, width: "100%", maxWidth: 480, maxHeight: "90vh", overflowY: "auto" }}>
+            <h3 style={{ color: COLORS.text, margin: "0 0 20px" }}>✏️ Editar Cita</h3>
+            <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+              {[
+                { label: "Paciente", key: "patientId", type: "select", options: patients.map(p => ({ value: p.id, label: p.name })) },
+                { label: "Fecha", key: "date", type: "date" },
+                { label: "Hora", key: "time", type: "time" },
+                { label: "Duración (min)", key: "duration", type: "number" },
+                { label: "Tratamiento", key: "treatment", type: "select", options: treatmentCatalog.map(t => ({ value: t, label: t })) },
+                { label: "Dentista", key: "dentist", type: "text" },
+                { label: "Notas", key: "notes", type: "text" },
+                { label: "Estado", key: "status", type: "select", options: [
+                  { value: "pendiente", label: "Pendiente" },
+                  { value: "confirmada", label: "Confirmada" },
+                  { value: "cancelada", label: "Cancelada" },
+                  { value: "completada", label: "Completada" },
+                ]},
+              ].map(f => (
+                <div key={f.key}>
+                  <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>{f.label}</label>
+                  {f.type === "select" ? (
+                    <select value={editForm[f.key]} onChange={e => setEditForm(p => ({ ...p, [f.key]: e.target.value }))} style={inputStyle}>
+                      <option value="">Seleccionar...</option>
+                      {f.options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                    </select>
+                  ) : (
+                    <input type={f.type} value={editForm[f.key]} onChange={e => setEditForm(p => ({ ...p, [f.key]: e.target.value }))} style={inputStyle} />
+                  )}
+                </div>
+              ))}
+            </div>
+            <div style={{ display: "flex", gap: 10, marginTop: 20 }}>
+              <button onClick={saveEdit} style={{ flex: 1, background: COLORS.accent, color: "#fff", border: "none", borderRadius: 8, padding: "10px", fontWeight: 700, cursor: "pointer" }}>Guardar cambios</button>
+              <button onClick={() => setEditAppt(null)} style={{ flex: 1, background: COLORS.card, color: COLORS.textMuted, border: `1px solid ${COLORS.border}`, borderRadius: 8, padding: "10px", cursor: "pointer" }}>Cancelar</button>
+            </div>
+          </div>
         </div>
       )}
 
