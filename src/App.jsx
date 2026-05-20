@@ -67,6 +67,12 @@ function AgendaView({ appointments, patients, setAppointments, setView, setSelec
   const [filterPatientId, setFilterPatientId] = useState(null); // null = todos
   const [editAppt, setEditAppt] = useState(null); // cita siendo editada
   const [editForm, setEditForm] = useState({});
+  // Buscador de paciente en formulario nueva cita
+  const [formPatSearch, setFormPatSearch] = useState("");
+  const [formPatSugg, setFormPatSugg] = useState([]);
+  // Buscador de paciente en formulario editar cita
+  const [editPatSearch, setEditPatSearch] = useState("");
+  const [editPatSugg, setEditPatSugg] = useState([]);
 
   // Mes visible en el calendario
   const [calMonth, setCalMonth] = useState(() => {
@@ -149,6 +155,25 @@ function AgendaView({ appointments, patients, setAppointments, setView, setSelec
       notes: appt.notes || "",
       status: appt.status,
     });
+    const p = patients.find(pt => pt.id === appt.patientId);
+    setEditPatSearch(p?.name || "");
+    setEditPatSugg([]);
+  };
+
+  const handleFormPatSearch = (val) => {
+    setFormPatSearch(val);
+    setForm(f => ({ ...f, patientId: "" }));
+    if (!val.trim()) { setFormPatSugg([]); return; }
+    const q = val.toLowerCase().replace(/\./g, "").replace(/-/g, "");
+    setFormPatSugg(patients.filter(p => p.name?.toLowerCase().includes(q) || p.rut?.replace(/\./g,"").replace(/-/g,"").toLowerCase().includes(q)).slice(0, 6));
+  };
+
+  const handleEditPatSearch = (val) => {
+    setEditPatSearch(val);
+    setEditForm(f => ({ ...f, patientId: "" }));
+    if (!val.trim()) { setEditPatSugg([]); return; }
+    const q = val.toLowerCase().replace(/\./g, "").replace(/-/g, "");
+    setEditPatSugg(patients.filter(p => p.name?.toLowerCase().includes(q) || p.rut?.replace(/\./g,"").replace(/-/g,"").toLowerCase().includes(q)).slice(0, 6));
   };
 
   const saveEdit = async () => {
@@ -360,8 +385,39 @@ function AgendaView({ appointments, patients, setAppointments, setView, setSelec
           <div style={{ background: COLORS.surface, border: `1px solid ${COLORS.border}`, borderRadius: 16, padding: 28, width: "100%", maxWidth: 480, maxHeight: "90vh", overflowY: "auto" }}>
             <h3 style={{ color: COLORS.text, margin: "0 0 20px" }}>✏️ Editar Cita</h3>
             <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+
+              {/* Buscador de paciente en edición */}
+              <div>
+                <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>Paciente</label>
+                <div style={{ position: "relative" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, background: COLORS.bg, border: `1px solid ${editForm.patientId ? COLORS.accent : COLORS.border}`, borderRadius: 8, padding: "8px 12px" }}>
+                    <span style={{ fontSize: 14 }}>👤</span>
+                    <input
+                      value={editPatSearch}
+                      onChange={e => handleEditPatSearch(e.target.value)}
+                      placeholder="Buscar por nombre o RUT…"
+                      style={{ flex: 1, border: "none", background: "transparent", outline: "none", fontSize: 13, color: COLORS.text }}
+                    />
+                    {editForm.patientId && <span style={{ fontSize: 11, color: COLORS.success, fontWeight: 700 }}>✓</span>}
+                  </div>
+                  {editPatSugg.length > 0 && (
+                    <div style={{ position: "absolute", top: "100%", left: 0, right: 0, background: COLORS.card, border: `1px solid ${COLORS.border}`, borderRadius: 10, zIndex: 200, boxShadow: "0 4px 16px rgba(0,0,0,0.15)", overflow: "hidden", marginTop: 4 }}>
+                      {editPatSugg.map(p => (
+                        <div key={p.id}
+                          onClick={() => { setEditPatSearch(p.name); setEditForm(f => ({ ...f, patientId: String(p.id) })); setEditPatSugg([]); }}
+                          style={{ padding: "10px 14px", cursor: "pointer", borderBottom: `1px solid ${COLORS.border}`, display: "flex", justifyContent: "space-between", alignItems: "center" }}
+                          onMouseEnter={e => e.currentTarget.style.background = COLORS.accent + "11"}
+                          onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+                          <span style={{ fontWeight: 600, color: COLORS.text, fontSize: 13 }}>{p.name}</span>
+                          {p.rut && <span style={{ fontSize: 11, color: COLORS.textMuted }}>{p.rut}</span>}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+
               {[
-                { label: "Paciente", key: "patientId", type: "select", options: patients.map(p => ({ value: p.id, label: p.name })) },
                 { label: "Fecha", key: "date", type: "date" },
                 { label: "Hora", key: "time", type: "time" },
                 { label: "Duración (min)", key: "duration", type: "number" },
@@ -401,8 +457,40 @@ function AgendaView({ appointments, patients, setAppointments, setView, setSelec
           <div style={{ background: COLORS.surface, border: `1px solid ${COLORS.border}`, borderRadius: 16, padding: 28, width: "100%", maxWidth: 480, maxHeight: "90vh", overflowY: "auto" }}>
             <h3 style={{ color: COLORS.text, margin: "0 0 20px" }}>Nueva Cita</h3>
             <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+
+              {/* Buscador de paciente */}
+              <div>
+                <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>Paciente</label>
+                <div style={{ position: "relative" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, background: COLORS.bg, border: `1px solid ${form.patientId ? COLORS.accent : COLORS.border}`, borderRadius: 8, padding: "8px 12px" }}>
+                    <span style={{ fontSize: 14 }}>👤</span>
+                    <input
+                      value={formPatSearch}
+                      onChange={e => handleFormPatSearch(e.target.value)}
+                      placeholder="Buscar por nombre o RUT…"
+                      style={{ flex: 1, border: "none", background: "transparent", outline: "none", fontSize: 13, color: COLORS.text }}
+                    />
+                    {form.patientId && <span style={{ fontSize: 11, color: COLORS.success, fontWeight: 700 }}>✓</span>}
+                  </div>
+                  {formPatSugg.length > 0 && (
+                    <div style={{ position: "absolute", top: "100%", left: 0, right: 0, background: COLORS.card, border: `1px solid ${COLORS.border}`, borderRadius: 10, zIndex: 200, boxShadow: "0 4px 16px rgba(0,0,0,0.15)", overflow: "hidden", marginTop: 4 }}>
+                      {formPatSugg.map(p => (
+                        <div key={p.id}
+                          onClick={() => { setFormPatSearch(p.name); setForm(f => ({ ...f, patientId: String(p.id) })); setFormPatSugg([]); }}
+                          style={{ padding: "10px 14px", cursor: "pointer", borderBottom: `1px solid ${COLORS.border}`, display: "flex", justifyContent: "space-between", alignItems: "center" }}
+                          onMouseEnter={e => e.currentTarget.style.background = COLORS.accent + "11"}
+                          onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+                          <span style={{ fontWeight: 600, color: COLORS.text, fontSize: 13 }}>{p.name}</span>
+                          {p.rut && <span style={{ fontSize: 11, color: COLORS.textMuted }}>{p.rut}</span>}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Resto de campos */}
               {[
-                { label: "Paciente", key: "patientId", type: "select", options: patients.map(p => ({ value: p.id, label: p.name })) },
                 { label: "Fecha", key: "date", type: "date" },
                 { label: "Hora", key: "time", type: "time" },
                 { label: "Duración (min)", key: "duration", type: "number" },
@@ -425,7 +513,7 @@ function AgendaView({ appointments, patients, setAppointments, setView, setSelec
             </div>
             <div style={{ display: "flex", gap: 10, marginTop: 20 }}>
               <button onClick={saveAppt} style={{ flex: 1, background: COLORS.accent, color: "#fff", border: "none", borderRadius: 8, padding: "10px", fontWeight: 700, cursor: "pointer" }}>Guardar</button>
-              <button onClick={() => setShowForm(false)} style={{ flex: 1, background: COLORS.card, color: COLORS.textMuted, border: `1px solid ${COLORS.border}`, borderRadius: 8, padding: "10px", cursor: "pointer" }}>Cancelar</button>
+              <button onClick={() => { setShowForm(false); setFormPatSearch(""); setFormPatSugg([]); }} style={{ flex: 1, background: COLORS.card, color: COLORS.textMuted, border: `1px solid ${COLORS.border}`, borderRadius: 8, padding: "10px", cursor: "pointer" }}>Cancelar</button>
             </div>
           </div>
         </div>
