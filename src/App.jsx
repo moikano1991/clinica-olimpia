@@ -2475,6 +2475,14 @@ function BudgetView({ budgets, setBudgets, patients, treatments, setTreatments }
   // Preview state
   const [preview, setPreview] = useState(null); // budget object
 
+  // Edit state
+  const [showEditForm, setShowEditForm] = useState(false);
+  const [editId, setEditId] = useState(null);
+  const [editForm, setEditForm] = useState({ patientId: "", date: today(), validUntil: "", items: [], discount: 0, notes: "", status: "borrador" });
+  const [editPatSearch, setEditPatSearch] = useState("");
+  const [editPatSugg, setEditPatSugg] = useState([]);
+  const [editNewItem, setEditNewItem] = useState({ procedure: "Limpieza dental", tooth: "-", quantity: 1, unitPrice: "" });
+
   const resetForm = () => {
     setForm({ patientId: "", date: today(), validUntil: addDays(today(), 30), items: [], discount: 0, notes: "", status: "borrador" });
     setPatSearch(""); setPatSugg([]); setNewItem({ procedure: "Limpieza dental", tooth: "-", quantity: 1, unitPrice: "" });
@@ -2529,6 +2537,61 @@ function BudgetView({ budgets, setBudgets, patients, treatments, setTreatments }
     await supabase.from("budgets").delete().eq("id", id);
     setBudgets(prev => prev.filter(b => b.id !== id));
     if (preview?.id === id) setPreview(null);
+  };
+
+  // Open edit modal pre-filled
+  const openEdit = (b) => {
+    const p = getPatient(b.patientId);
+    setEditId(b.id);
+    setEditForm({
+      patientId: String(b.patientId),
+      date: b.date,
+      validUntil: b.valid_until || "",
+      items: (b.items || []).map(it => ({ ...it, id: it.id || Date.now() + Math.random() })),
+      discount: b.discount || 0,
+      notes: b.notes || "",
+      status: b.status || "borrador",
+    });
+    setEditPatSearch(p?.name || "");
+    setEditPatSugg([]);
+    setEditNewItem({ procedure: "Limpieza dental", tooth: "-", quantity: 1, unitPrice: "" });
+    setShowEditForm(true);
+  };
+
+  const handleEditPatSearch = (val) => {
+    setEditPatSearch(val);
+    setEditForm(f => ({ ...f, patientId: "" }));
+    if (!val.trim()) { setEditPatSugg([]); return; }
+    const q = val.toLowerCase().replace(/\./g, "").replace(/-/g, "");
+    setEditPatSugg(patients.filter(p => p.name?.toLowerCase().includes(q) || p.rut?.replace(/\./g,"").replace(/-/g,"").toLowerCase().includes(q)).slice(0, 6));
+  };
+
+  const addEditItem = () => {
+    if (!editNewItem.procedure || !editNewItem.unitPrice) return;
+    setEditForm(f => ({ ...f, items: [...f.items, { ...editNewItem, unitPrice: Number(editNewItem.unitPrice), id: Date.now() }] }));
+    setEditNewItem({ procedure: "Limpieza dental", tooth: "-", quantity: 1, unitPrice: "" });
+  };
+
+  const saveEdit = async () => {
+    if (!editForm.patientId || editForm.items.length === 0) {
+      alert("Selecciona un paciente y agrega al menos un ítem.");
+      return;
+    }
+    const { data, error } = await supabase.from("budgets").update({
+      patient_id: Number(editForm.patientId),
+      date: editForm.date,
+      valid_until: editForm.validUntil || null,
+      items: editForm.items,
+      discount: Number(editForm.discount) || 0,
+      notes: editForm.notes,
+      status: editForm.status,
+    }).eq("id", editId).select().single();
+    if (!error) {
+      const updated = toBudget(data);
+      setBudgets(prev => prev.map(b => b.id === editId ? updated : b));
+      if (preview?.id === editId) setPreview(updated);
+      setShowEditForm(false);
+    } else alert("Error guardando: " + error.message);
   };
 
   // Convertir presupuesto en tratamientos del historial clínico
@@ -2805,6 +2868,10 @@ function BudgetView({ budgets, setBudgets, patients, treatments, setTreatments }
                     style={{ background: COLORS.accent + "18", color: COLORS.accent, border: `1px solid ${COLORS.accent}33`, borderRadius: 6, padding: "5px 12px", fontSize: 12, cursor: "pointer", fontWeight: 600 }}>
                     👁 Ver / PDF
                   </button>
+                  <button onClick={() => openEdit(b)}
+                    style={{ background: COLORS.warning + "15", color: COLORS.warning, border: `1px solid ${COLORS.warning}44`, borderRadius: 6, padding: "5px 12px", fontSize: 12, cursor: "pointer", fontWeight: 600 }}>
+                    ✏️ Editar
+                  </button>
                   <button onClick={() => createTreatmentsFromBudget(b)}
                     style={{ background: "#f0fdf4", color: COLORS.success, border: `1px solid ${COLORS.success}44`, borderRadius: 6, padding: "5px 12px", fontSize: 12, cursor: "pointer", fontWeight: 700, display: "flex", alignItems: "center", gap: 4 }}>
                     🦷 Agregar tratamiento
@@ -2989,6 +3056,146 @@ function BudgetView({ budgets, setBudgets, patients, treatments, setTreatments }
         </div>
       )}
 
+      {/* ── MODAL EDITAR PRESUPUESTO ─────────────────────────────── */}
+      {showEditForm && (
+        <div style={{ position: "fixed", inset: 0, background: "#00000088", zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+          <div style={{ background: COLORS.surface, border: `1px solid ${COLORS.border}`, borderRadius: 18, padding: 28, width: "100%", maxWidth: 620, maxHeight: "92vh", overflowY: "auto" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+              <h3 style={{ color: COLORS.text, margin: 0 }}>✏️ Editar Presupuesto <span style={{ color: COLORS.textMuted, fontSize: 14, fontWeight: 400 }}>#{String(editId).padStart(4,"0")}</span></h3>
+              <button onClick={() => setShowEditForm(false)} style={{ background: "none", border: "none", color: COLORS.textMuted, cursor: "pointer", fontSize: 22 }}>×</button>
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 14 }}>
+              {/* Paciente */}
+              <div style={{ gridColumn: "1 / -1" }}>
+                <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>Paciente *</label>
+                <div style={{ position: "relative" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, background: COLORS.bg, border: `1px solid ${editForm.patientId ? COLORS.accent : COLORS.border}`, borderRadius: 8, padding: "8px 12px" }}>
+                    <span>👤</span>
+                    <input value={editPatSearch} onChange={e => handleEditPatSearch(e.target.value)}
+                      placeholder="Buscar por nombre o RUT…"
+                      style={{ flex: 1, border: "none", background: "transparent", outline: "none", fontSize: 13, color: COLORS.text }} />
+                    {editForm.patientId && <span style={{ fontSize: 11, color: COLORS.success, fontWeight: 700 }}>✓</span>}
+                  </div>
+                  {editPatSugg.length > 0 && (
+                    <div style={{ position: "absolute", top: "100%", left: 0, right: 0, background: COLORS.card, border: `1px solid ${COLORS.border}`, borderRadius: 10, zIndex: 300, boxShadow: "0 8px 24px rgba(0,0,0,0.12)" }}>
+                      {editPatSugg.map(p => (
+                        <div key={p.id} onClick={() => { setEditPatSearch(p.name); setEditForm(f => ({ ...f, patientId: String(p.id) })); setEditPatSugg([]); }}
+                          style={{ padding: "10px 14px", cursor: "pointer", display: "flex", justifyContent: "space-between", borderBottom: `1px solid ${COLORS.border}` }}
+                          onMouseEnter={e => e.currentTarget.style.background = COLORS.bg}
+                          onMouseLeave={e => e.currentTarget.style.background = ""}>
+                          <span style={{ fontWeight: 600, color: COLORS.text }}>{p.name}</span>
+                          {p.rut && <span style={{ color: COLORS.textMuted, fontSize: 12 }}>{p.rut}</span>}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+              <div>
+                <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>Fecha emisión</label>
+                <input type="date" value={editForm.date} onChange={e => setEditForm(f => ({ ...f, date: e.target.value }))} style={inputStyle} />
+              </div>
+              <div>
+                <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>Válido hasta</label>
+                <input type="date" value={editForm.validUntil} onChange={e => setEditForm(f => ({ ...f, validUntil: e.target.value }))} style={inputStyle} />
+              </div>
+            </div>
+
+            {/* Items */}
+            <div style={{ background: COLORS.bg, borderRadius: 12, padding: 16, marginBottom: 14 }}>
+              <div style={{ fontWeight: 700, color: COLORS.text, fontSize: 13, marginBottom: 12 }}>🦷 Procedimientos</div>
+              {editForm.items.length > 0 && (
+                <div style={{ marginBottom: 12 }}>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 60px 60px 90px 32px", gap: 6, padding: "0 4px 6px", borderBottom: `1px solid ${COLORS.border}`, marginBottom: 6 }}>
+                    {["Procedimiento","Pieza","Cant.","Precio",""].map(h => <div key={h} style={{ fontSize: 10, color: COLORS.textMuted, fontWeight: 700 }}>{h}</div>)}
+                  </div>
+                  {editForm.items.map((it, idx) => (
+                    <div key={it.id || idx} style={{ display: "grid", gridTemplateColumns: "1fr 60px 60px 90px 32px", gap: 6, padding: "6px 4px", borderBottom: `1px solid ${COLORS.border}44`, alignItems: "center" }}>
+                      <div style={{ fontSize: 12, color: COLORS.text, fontWeight: 600 }}>{it.procedure}</div>
+                      <div style={{ fontSize: 11, color: COLORS.textMuted, textAlign: "center" }}>{it.tooth !== "-" ? it.tooth : "—"}</div>
+                      <div style={{ fontSize: 12, color: COLORS.text, textAlign: "center" }}>{it.quantity}</div>
+                      <div style={{ fontSize: 12, color: COLORS.text, textAlign: "right" }}>{formatCLP(it.quantity * it.unitPrice)}</div>
+                      <button onClick={() => setEditForm(f => ({ ...f, items: f.items.filter((_, i) => i !== idx) }))}
+                        style={{ background: COLORS.danger + "15", color: COLORS.danger, border: "none", borderRadius: 4, padding: "3px 7px", fontSize: 12, cursor: "pointer" }}>×</button>
+                    </div>
+                  ))}
+                  <div style={{ textAlign: "right", marginTop: 8, fontSize: 13 }}>
+                    <span style={{ color: COLORS.textMuted }}>Subtotal: </span>
+                    <span style={{ fontWeight: 700, color: COLORS.text }}>{formatCLP(calcSubtotal(editForm.items))}</span>
+                  </div>
+                </div>
+              )}
+              {/* Add item row */}
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 80px 52px 110px auto", gap: 6, alignItems: "end" }}>
+                <div>
+                  <label style={{ fontSize: 10, color: COLORS.textMuted, display: "block", marginBottom: 3 }}>Procedimiento</label>
+                  <select value={editNewItem.procedure} onChange={e => setEditNewItem(i => ({ ...i, procedure: e.target.value }))} style={{ ...inputStyle, fontSize: 12, padding: "7px 8px" }}>
+                    {treatmentCatalog.map(t => <option key={t} value={t}>{t}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label style={{ fontSize: 10, color: COLORS.textMuted, display: "block", marginBottom: 3 }}>Pieza FDI</label>
+                  <input value={editNewItem.tooth === "-" ? "" : editNewItem.tooth} onChange={e => setEditNewItem(i => ({ ...i, tooth: e.target.value || "-" }))}
+                    placeholder="ej: 11" style={{ ...inputStyle, fontSize: 12, padding: "7px 8px" }} />
+                </div>
+                <div>
+                  <label style={{ fontSize: 10, color: COLORS.textMuted, display: "block", marginBottom: 3 }}>Cant.</label>
+                  <input type="number" min={1} value={editNewItem.quantity} onChange={e => setEditNewItem(i => ({ ...i, quantity: Math.max(1, Number(e.target.value)) }))}
+                    style={{ ...inputStyle, fontSize: 12, padding: "7px 8px", textAlign: "center" }} />
+                </div>
+                <div>
+                  <label style={{ fontSize: 10, color: COLORS.textMuted, display: "block", marginBottom: 3 }}>Precio unit. ($)</label>
+                  <input type="number" value={editNewItem.unitPrice} onChange={e => setEditNewItem(i => ({ ...i, unitPrice: e.target.value }))}
+                    placeholder="0" style={{ ...inputStyle, fontSize: 12, padding: "7px 8px" }} />
+                </div>
+                <button onClick={addEditItem}
+                  style={{ background: COLORS.accent, color: "#fff", border: "none", borderRadius: 8, padding: "8px 12px", fontWeight: 700, cursor: "pointer", fontSize: 14, alignSelf: "end" }}>+</button>
+              </div>
+            </div>
+
+            {/* Discount + status + notes */}
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 14 }}>
+              <div>
+                <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>Descuento (%)</label>
+                <input type="number" min={0} max={100} value={editForm.discount} onChange={e => setEditForm(f => ({ ...f, discount: e.target.value }))} placeholder="0" style={inputStyle} />
+              </div>
+              <div>
+                <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>Estado</label>
+                <select value={editForm.status} onChange={e => setEditForm(f => ({ ...f, status: e.target.value }))} style={inputStyle}>
+                  {Object.entries(BUDGET_STATUS).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+                </select>
+              </div>
+              <div style={{ gridColumn: "1 / -1" }}>
+                <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>Notas / Condiciones</label>
+                <textarea value={editForm.notes} onChange={e => setEditForm(f => ({ ...f, notes: e.target.value }))}
+                  placeholder="Condiciones, formas de pago, observaciones…"
+                  rows={3} style={{ ...inputStyle, resize: "vertical", fontFamily: "inherit" }} />
+              </div>
+            </div>
+
+            {/* Total preview */}
+            {editForm.items.length > 0 && (
+              <div style={{ background: COLORS.bg, borderRadius: 10, padding: "12px 16px", marginBottom: 18, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <div style={{ fontSize: 13, color: COLORS.textMuted }}>
+                  {editForm.discount > 0 && <div>Subtotal: <strong>{formatCLP(calcSubtotal(editForm.items))}</strong> · Descuento: <span style={{ color: COLORS.success }}>-{formatCLP(calcDiscount(editForm.items, Number(editForm.discount)))}</span></div>}
+                </div>
+                <div style={{ fontSize: 20, fontWeight: 800, color: COLORS.accent }}>TOTAL: {formatCLP(calcTotal(editForm.items, Number(editForm.discount)))}</div>
+              </div>
+            )}
+
+            <div style={{ display: "flex", gap: 10 }}>
+              <button onClick={saveEdit} style={{ flex: 1, background: COLORS.accent, color: "#fff", border: "none", borderRadius: 8, padding: "12px", fontWeight: 700, cursor: "pointer", fontSize: 15 }}>
+                ✓ Guardar cambios
+              </button>
+              <button onClick={() => setShowEditForm(false)} style={{ flex: 1, background: COLORS.card, color: COLORS.textMuted, border: `1px solid ${COLORS.border}`, borderRadius: 8, padding: "12px", cursor: "pointer" }}>
+                Cancelar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ── MODAL PREVIEW / PDF ──────────────────────────────────── */}
       {preview && (
         <div style={{ position: "fixed", inset: 0, background: "#00000099", zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
@@ -3087,6 +3294,10 @@ function BudgetView({ budgets, setBudgets, patients, treatments, setTreatments }
                 <button onClick={() => exportPDF(preview)}
                   style={{ flex: 1, minWidth: 160, background: COLORS.accent, color: "#fff", border: "none", borderRadius: 8, padding: "11px 16px", fontWeight: 700, cursor: "pointer", fontSize: 14, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
                   📄 Descargar PDF
+                </button>
+                <button onClick={() => { setPreview(null); openEdit(preview); }}
+                  style={{ background: COLORS.warning + "15", color: COLORS.warning, border: `1px solid ${COLORS.warning}44`, borderRadius: 8, padding: "11px 16px", fontWeight: 700, cursor: "pointer", fontSize: 14 }}>
+                  ✏️ Editar
                 </button>
                 <button onClick={() => createTreatmentsFromBudget(preview)}
                   style={{ flex: 1, minWidth: 180, background: "#f0fdf4", color: COLORS.success, border: `1.5px solid ${COLORS.success}55`, borderRadius: 8, padding: "11px 16px", fontWeight: 700, cursor: "pointer", fontSize: 14, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
