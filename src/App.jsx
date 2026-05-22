@@ -1865,7 +1865,7 @@ function BudgetStatusBadge({ status }) {
   );
 }
 
-function BudgetView({ budgets, setBudgets, patients }) {
+function BudgetView({ budgets, setBudgets, patients, treatments, setTreatments }) {
   const getPatient = (id) => patients.find(p => p.id === Number(id));
 
   // List state
@@ -1936,6 +1936,35 @@ function BudgetView({ budgets, setBudgets, patients }) {
     await supabase.from("budgets").delete().eq("id", id);
     setBudgets(prev => prev.filter(b => b.id !== id));
     if (preview?.id === id) setPreview(null);
+  };
+
+  // Convertir presupuesto en tratamientos del historial clínico
+  const createTreatmentsFromBudget = async (budget) => {
+    const p = getPatient(budget.patientId);
+    const items = budget.items || [];
+    if (items.length === 0) { alert("Este presupuesto no tiene ítems."); return; }
+    if (!window.confirm(
+      `¿Agregar ${items.length} tratamiento${items.length !== 1 ? "s" : ""} al historial clínico de ${p?.name || "este paciente"}?\n\nSe crearán como "Planificado" con el costo del presupuesto.`
+    )) return;
+
+    const rows = items.map(it => ({
+      patient_id: Number(budget.patientId),
+      date: today(),
+      procedure: it.procedure,
+      tooth: it.tooth || "-",
+      cost: Number(it.unitPrice) * Number(it.quantity),
+      paid: 0,
+      status: "planificado",
+      notes: `Generado desde presupuesto #${String(budget.id).padStart(4, "0")}`,
+    }));
+
+    const { data, error } = await supabase.from("treatments").insert(rows).select();
+    if (error) { alert("Error al crear tratamientos: " + error.message); return; }
+
+    setTreatments(prev => [...prev, ...(data || []).map(toTreat)]);
+    // Marcar presupuesto como aceptado si no lo estaba
+    if (budget.status !== "aceptado") await updateStatus(budget.id, "aceptado");
+    alert(`✅ Se crearon ${(data || []).length} tratamiento${(data || []).length !== 1 ? "s" : ""} en el historial clínico de ${p?.name}.`);
   };
 
   // Export PDF
@@ -2182,6 +2211,10 @@ function BudgetView({ budgets, setBudgets, patients }) {
                   <button onClick={() => setPreview(b)}
                     style={{ background: COLORS.accent + "18", color: COLORS.accent, border: `1px solid ${COLORS.accent}33`, borderRadius: 6, padding: "5px 12px", fontSize: 12, cursor: "pointer", fontWeight: 600 }}>
                     👁 Ver / PDF
+                  </button>
+                  <button onClick={() => createTreatmentsFromBudget(b)}
+                    style={{ background: "#f0fdf4", color: COLORS.success, border: `1px solid ${COLORS.success}44`, borderRadius: 6, padding: "5px 12px", fontSize: 12, cursor: "pointer", fontWeight: 700, display: "flex", alignItems: "center", gap: 4 }}>
+                    🦷 Agregar tratamiento
                   </button>
                   {b.status !== "aceptado" && (
                     <button onClick={() => updateStatus(b.id, "aceptado")}
@@ -2461,6 +2494,10 @@ function BudgetView({ budgets, setBudgets, patients }) {
                 <button onClick={() => exportPDF(preview)}
                   style={{ flex: 1, minWidth: 160, background: COLORS.accent, color: "#fff", border: "none", borderRadius: 8, padding: "11px 16px", fontWeight: 700, cursor: "pointer", fontSize: 14, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
                   📄 Descargar PDF
+                </button>
+                <button onClick={() => createTreatmentsFromBudget(preview)}
+                  style={{ flex: 1, minWidth: 180, background: "#f0fdf4", color: COLORS.success, border: `1.5px solid ${COLORS.success}55`, borderRadius: 8, padding: "11px 16px", fontWeight: 700, cursor: "pointer", fontSize: 14, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
+                  🦷 Agregar al historial clínico
                 </button>
                 {preview.status !== "aceptado" && (
                   <button onClick={() => updateStatus(preview.id, "aceptado")}
@@ -2754,7 +2791,7 @@ export default function App() {
           {view === "agenda"      && <AgendaView key={agendaConfig.date + agendaConfig.filter} appointments={appointments} patients={patients} setAppointments={setAppointments} setView={setView} setSelectedPatient={setSelectedPatient} initialDate={agendaConfig.date} initialFilter={agendaConfig.filter} syncGCal={syncGCal} gcalConnected={gcalConnected} connectGCal={connectGCal} />}
           {view === "patients"    && <PatientsView patients={patients} setPatients={setPatients} appointments={appointments} treatments={treatments} setTreatments={setTreatments} selectedPatient={selectedPatient} setSelectedPatient={setSelectedPatient} />}
           {view === "treatments"  && <TreatmentsView treatments={treatments} setTreatments={setTreatments} patients={patients} />}
-          {view === "budgets"     && <BudgetView budgets={budgets} setBudgets={setBudgets} patients={patients} />}
+          {view === "budgets"     && <BudgetView budgets={budgets} setBudgets={setBudgets} patients={patients} treatments={treatments} setTreatments={setTreatments} />}
           {view === "performance" && <PerformanceView appointments={appointments} treatments={treatments} patients={patients} />}
         </div>
       </main>
