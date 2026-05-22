@@ -28,7 +28,31 @@ const toTreat = (r) => ({ ...r, patientId: r.patient_id });
 const toBudget = (r) => ({ ...r, patientId: r.patient_id });
 const addDays = (dateStr, days) => { const d = new Date(dateStr); d.setDate(d.getDate() + days); return d.toISOString().split("T")[0]; };
 
-const treatmentCatalog = ["Limpieza dental", "Extracción simple", "Extracción quirúrgica", "Obturación resina", "Obturación amalgama", "Radiografía periapical", "Radiografía panorámica", "Blanqueamiento", "Corona cerámica", "Prótesis removible", "Implante", "Endodoncia", "Periodoncia", "Ortodoncia consulta", "Sellantes"];
+const treatmentCatalog = [
+  "Diagnóstico",
+  "Moldes",
+  "Limpieza dental",
+  "Obturación resina",
+  "Obturación amalgama",
+  "Extracción simple",
+  "Extracción quirúrgica",
+  "Radiografía periapical",
+  "Radiografía panorámica",
+  "Endodoncia",
+  "Periodoncia",
+  "Sellantes",
+  "Plano oclusal",
+  "Instalación ortodoncia",
+  "Control ortodoncia",
+  "Control implante",
+  "Control cirugía",
+  "Carilla",
+  "Blanqueamiento",
+  "Corona cerámica",
+  "Prótesis removible",
+  "Implante",
+  "Ortodoncia consulta",
+];
 
 const formatCLP = (n) => new Intl.NumberFormat("es-CL", { style: "currency", currency: "CLP" }).format(n);
 const formatDate = (d) => { if (!d) return ""; const [y, m, day] = d.split("-"); return `${day}/${m}/${y}`; };
