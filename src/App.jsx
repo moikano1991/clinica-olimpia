@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef } from "react";
 import { supabase } from "./supabase";
 import * as XLSX from "xlsx";
+import { jsPDF } from "jspdf";
+import autoTable from "jspdf-autotable";
 
 const COLORS = {
   bg: "#f0f4f8",
@@ -23,6 +25,8 @@ const COLORS = {
 
 const toAppt = (r) => ({ ...r, patientId: r.patient_id });
 const toTreat = (r) => ({ ...r, patientId: r.patient_id });
+const toBudget = (r) => ({ ...r, patientId: r.patient_id });
+const addDays = (dateStr, days) => { const d = new Date(dateStr); d.setDate(d.getDate() + days); return d.toISOString().split("T")[0]; };
 
 const treatmentCatalog = ["Limpieza dental", "Extracción simple", "Extracción quirúrgica", "Obturación resina", "Obturación amalgama", "Radiografía periapical", "Radiografía panorámica", "Blanqueamiento", "Corona cerámica", "Prótesis removible", "Implante", "Endodoncia", "Periodoncia", "Ortodoncia consulta", "Sellantes"];
 
@@ -1842,6 +1846,643 @@ function LoginView({ onLogin }) {
   );
 }
 
+// ── Módulo Presupuestos ────────────────────────────────────────────
+const BUDGET_STATUS = {
+  borrador:       { label: "Borrador",        color: "#64748b", bg: "#f1f5f9" },
+  enviado:        { label: "Enviado",          color: "#2563eb", bg: "#eff6ff" },
+  aceptado:       { label: "Aceptado ✓",      color: "#059669", bg: "#f0fdf4" },
+  rechazado:      { label: "Rechazado",        color: "#dc2626", bg: "#fff1f2" },
+  vencido:        { label: "Vencido",          color: "#d97706", bg: "#fffbeb" },
+};
+
+function BudgetStatusBadge({ status }) {
+  const s = BUDGET_STATUS[status] || BUDGET_STATUS.borrador;
+  return (
+    <span style={{ background: s.bg, color: s.color, border: `1px solid ${s.color}33`,
+      borderRadius: 20, padding: "3px 10px", fontSize: 11, fontWeight: 700 }}>
+      {s.label}
+    </span>
+  );
+}
+
+function BudgetView({ budgets, setBudgets, patients }) {
+  const getPatient = (id) => patients.find(p => p.id === Number(id));
+
+  // List state
+  const [search, setSearch] = useState("");
+  const [filterStatus, setFilterStatus] = useState("");
+
+  // Form state
+  const [showForm, setShowForm] = useState(false);
+  const [patSearch, setPatSearch] = useState("");
+  const [patSugg, setPatSugg] = useState([]);
+  const [form, setForm] = useState({ patientId: "", date: today(), validUntil: addDays(today(), 30), items: [], discount: 0, notes: "", status: "borrador" });
+  const [newItem, setNewItem] = useState({ procedure: "Limpieza dental", tooth: "-", quantity: 1, unitPrice: "" });
+
+  // Preview state
+  const [preview, setPreview] = useState(null); // budget object
+
+  const resetForm = () => {
+    setForm({ patientId: "", date: today(), validUntil: addDays(today(), 30), items: [], discount: 0, notes: "", status: "borrador" });
+    setPatSearch(""); setPatSugg([]); setNewItem({ procedure: "Limpieza dental", tooth: "-", quantity: 1, unitPrice: "" });
+  };
+
+  // Computed totals
+  const calcSubtotal = (items) => items.reduce((s, it) => s + (it.quantity * it.unitPrice), 0);
+  const calcDiscount = (items, pct) => Math.round(calcSubtotal(items) * pct / 100);
+  const calcTotal = (items, pct) => calcSubtotal(items) - calcDiscount(items, pct);
+
+  // Patient search
+  const handlePatSearch = (val) => {
+    setPatSearch(val);
+    setForm(f => ({ ...f, patientId: "" }));
+    if (!val.trim()) { setPatSugg([]); return; }
+    const q = val.toLowerCase().replace(/\./g, "").replace(/-/g, "");
+    setPatSugg(patients.filter(p => p.name?.toLowerCase().includes(q) || p.rut?.replace(/\./g,"").replace(/-/g,"").toLowerCase().includes(q)).slice(0, 6));
+  };
+
+  // Add line item
+  const addItem = () => {
+    if (!newItem.procedure || !newItem.unitPrice) return;
+    setForm(f => ({ ...f, items: [...f.items, { ...newItem, unitPrice: Number(newItem.unitPrice), id: Date.now() }] }));
+    setNewItem({ procedure: "Limpieza dental", tooth: "-", quantity: 1, unitPrice: "" });
+  };
+
+  // Save budget to Supabase
+  const saveBudget = async () => {
+    if (!form.patientId || form.items.length === 0) {
+      alert("Selecciona un paciente y agrega al menos un ítem.");
+      return;
+    }
+    const { data, error } = await supabase.from("budgets").insert([{
+      patient_id: Number(form.patientId), date: form.date,
+      valid_until: form.validUntil || null, items: form.items,
+      discount: Number(form.discount) || 0, notes: form.notes, status: form.status,
+    }]).select().single();
+    if (!error) { setBudgets(prev => [toBudget(data), ...prev]); resetForm(); setShowForm(false); }
+    else alert("Error guardando: " + error.message);
+  };
+
+  // Update status
+  const updateStatus = async (id, status) => {
+    await supabase.from("budgets").update({ status }).eq("id", id);
+    setBudgets(prev => prev.map(b => b.id === id ? { ...b, status } : b));
+    if (preview?.id === id) setPreview(p => ({ ...p, status }));
+  };
+
+  // Delete
+  const deleteBudget = async (id) => {
+    if (!window.confirm("¿Eliminar este presupuesto?")) return;
+    await supabase.from("budgets").delete().eq("id", id);
+    setBudgets(prev => prev.filter(b => b.id !== id));
+    if (preview?.id === id) setPreview(null);
+  };
+
+  // Export PDF
+  const exportPDF = (budget) => {
+    const p = getPatient(budget.patientId);
+    const sub = calcSubtotal(budget.items);
+    const disc = calcDiscount(budget.items, budget.discount);
+    const total = calcTotal(budget.items, budget.discount);
+    const budgetNum = `N° ${String(budget.id).padStart(4, "0")}`;
+
+    const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+
+    // Header background
+    doc.setFillColor(30, 58, 110);
+    doc.rect(0, 0, 210, 38, "F");
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(22);
+    doc.setFont("helvetica", "bold");
+    doc.text("Clínica Olimpia", 14, 17);
+    doc.setFontSize(9);
+    doc.setFont("helvetica", "normal");
+    doc.text("Arturo Prat 350, Of. 506 · Temuco, La Araucanía", 14, 25);
+    doc.text("Dra. María Florencia Muñoz · Cirujano Dentista", 14, 31);
+
+    // Budget title
+    doc.setTextColor(30, 58, 110);
+    doc.setFontSize(18);
+    doc.setFont("helvetica", "bold");
+    doc.text("PRESUPUESTO DENTAL", 14, 52);
+
+    // Budget meta (top right)
+    doc.setFontSize(9);
+    doc.setFont("helvetica", "normal");
+    doc.setTextColor(100, 116, 139);
+    doc.text(budgetNum, 196, 52, { align: "right" });
+    doc.text(`Fecha: ${formatDate(budget.date)}`, 196, 59, { align: "right" });
+    if (budget.valid_until) doc.text(`Válido hasta: ${formatDate(budget.valid_until)}`, 196, 66, { align: "right" });
+
+    // Patient info box
+    doc.setFillColor(240, 244, 248);
+    doc.roundedRect(14, 57, 125, 24, 3, 3, "F");
+    doc.setFontSize(8);
+    doc.setFont("helvetica", "bold");
+    doc.setTextColor(100, 116, 139);
+    doc.text("PACIENTE", 18, 64);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(11);
+    doc.setTextColor(30, 41, 59);
+    doc.text(p?.name || "—", 18, 71);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(9);
+    doc.setTextColor(100, 116, 139);
+    const metaLine = [p?.rut && `RUT: ${p.rut}`, p?.phone && `Tel: ${p.phone}`, p?.email].filter(Boolean).join("   ·   ");
+    if (metaLine) doc.text(metaLine, 18, 77);
+
+    // Status badge
+    const st = BUDGET_STATUS[budget.status] || BUDGET_STATUS.borrador;
+    doc.setFillColor(st.bg.startsWith("#f0f") ? 240 : 239, st.bg.startsWith("#f0f") ? 253 : 246, st.bg.startsWith("#f0f") ? 244 : 255);
+    doc.setFontSize(9);
+    doc.setFont("helvetica", "bold");
+    doc.setTextColor(5, 150, 105);
+    doc.text(st.label.toUpperCase(), 155, 70);
+
+    // Items table
+    autoTable(doc, {
+      startY: 87,
+      head: [["N°", "Procedimiento", "Pieza FDI", "Cant.", "Precio Unit.", "Subtotal"]],
+      body: budget.items.map((it, i) => [
+        i + 1,
+        it.procedure,
+        it.tooth && it.tooth !== "-" ? `FDI ${it.tooth}` : "—",
+        it.quantity,
+        formatCLP(it.unitPrice),
+        formatCLP(it.quantity * it.unitPrice),
+      ]),
+      headStyles: { fillColor: [37, 99, 235], textColor: 255, fontStyle: "bold", fontSize: 9, halign: "center" },
+      bodyStyles: { fontSize: 9, textColor: [30, 41, 59] },
+      alternateRowStyles: { fillColor: [247, 250, 252] },
+      columnStyles: {
+        0: { halign: "center", cellWidth: 10 },
+        2: { halign: "center", cellWidth: 22 },
+        3: { halign: "center", cellWidth: 14 },
+        4: { halign: "right", cellWidth: 32 },
+        5: { halign: "right", cellWidth: 32 },
+      },
+      margin: { left: 14, right: 14 },
+      tableLineColor: [226, 232, 240],
+      tableLineWidth: 0.1,
+    });
+
+    let y = doc.lastAutoTable.finalY + 6;
+
+    // Totals
+    const rX = 196, lX = 140;
+    doc.setFontSize(9);
+    doc.setFont("helvetica", "normal");
+    doc.setTextColor(100, 116, 139);
+    doc.text("Subtotal:", lX, y);
+    doc.text(formatCLP(sub), rX, y, { align: "right" });
+    y += 7;
+    if (budget.discount > 0) {
+      doc.text(`Descuento (${budget.discount}%):`, lX, y);
+      doc.setTextColor(220, 38, 38);
+      doc.text(`- ${formatCLP(disc)}`, rX, y, { align: "right" });
+      y += 7;
+      doc.setTextColor(100, 116, 139);
+    }
+    // Total box
+    doc.setFillColor(37, 99, 235);
+    doc.roundedRect(130, y - 1, 66, 13, 2, 2, "F");
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(11);
+    doc.setFont("helvetica", "bold");
+    doc.text("TOTAL:", 134, y + 7);
+    doc.text(formatCLP(total), rX, y + 7, { align: "right" });
+    y += 20;
+
+    // Notes
+    if (budget.notes) {
+      doc.setFontSize(9);
+      doc.setFont("helvetica", "bold");
+      doc.setTextColor(30, 41, 59);
+      doc.text("Observaciones:", 14, y);
+      doc.setFont("helvetica", "normal");
+      doc.setTextColor(100, 116, 139);
+      const noteLines = doc.splitTextToSize(budget.notes, 182);
+      doc.text(noteLines, 14, y + 6);
+      y += 6 + noteLines.length * 5 + 6;
+    }
+
+    // Signature lines
+    const sigY = Math.max(y + 10, 240);
+    doc.setDrawColor(200, 210, 220);
+    doc.line(14, sigY, 85, sigY);
+    doc.line(125, sigY, 196, sigY);
+    doc.setFontSize(8);
+    doc.setFont("helvetica", "normal");
+    doc.setTextColor(100, 116, 139);
+    doc.text("Firma y aceptación del paciente", 14, sigY + 5);
+    doc.text("Dra. María Florencia Muñoz", 125, sigY + 5);
+    doc.text("Cirujano Dentista", 125, sigY + 10);
+
+    // Footer
+    doc.setFillColor(240, 244, 248);
+    doc.rect(0, 282, 210, 15, "F");
+    doc.setFontSize(8);
+    doc.setFont("helvetica", "italic");
+    doc.setTextColor(148, 163, 184);
+    doc.text("Este presupuesto es referencial y tiene una validez de 30 días desde su fecha de emisión. Los precios están sujetos a cambio.", 105, 289, { align: "center" });
+    doc.text("Clínica Olimpia · Arturo Prat 350, Of. 506 · Temuco", 105, 294, { align: "center" });
+
+    doc.save(`Presupuesto_${p?.name?.replace(/ /g, "_") || "Paciente"}_${budget.date}.pdf`);
+  };
+
+  // Filtered list
+  const filtered = [...budgets]
+    .filter(b => {
+      const p = getPatient(b.patientId);
+      const q = search.toLowerCase();
+      return (!search || (p?.name || "").toLowerCase().includes(q) || (p?.rut || "").includes(q))
+        && (!filterStatus || b.status === filterStatus);
+    })
+    .sort((a, b) => b.id - a.id);
+
+  // Stats
+  const total_budgets = budgets.length;
+  const total_aceptados = budgets.filter(b => b.status === "aceptado").length;
+  const total_pendientes = budgets.filter(b => ["borrador", "enviado"].includes(b.status)).length;
+  const total_revenue = budgets.filter(b => b.status === "aceptado")
+    .reduce((s, b) => s + calcTotal(b.items || [], b.discount || 0), 0);
+
+  return (
+    <div>
+      {/* Stats strip */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: 12, marginBottom: 22 }}>
+        {[
+          { label: "Total presupuestos", value: total_budgets, color: COLORS.accent, icon: "📋" },
+          { label: "Pendientes",         value: total_pendientes, color: COLORS.warning, icon: "⏳" },
+          { label: "Aceptados",          value: total_aceptados, color: COLORS.success, icon: "✅" },
+          { label: "Ingresos potenciales", value: formatCLP(total_revenue), color: COLORS.success, icon: "💰" },
+        ].map(s => (
+          <div key={s.label} style={{ background: COLORS.card, border: `1px solid ${COLORS.border}`, borderRadius: 12, padding: "14px 16px" }}>
+            <div style={{ fontSize: 18, marginBottom: 4 }}>{s.icon}</div>
+            <div style={{ fontWeight: 800, fontSize: 20, color: s.color }}>{s.value}</div>
+            <div style={{ fontSize: 11, color: COLORS.textMuted, marginTop: 2 }}>{s.label}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Toolbar */}
+      <div style={{ display: "flex", gap: 10, marginBottom: 18, flexWrap: "wrap" }}>
+        <div style={{ position: "relative", flex: 1, minWidth: 200 }}>
+          <span style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", fontSize: 14 }}>🔍</span>
+          <input value={search} onChange={e => setSearch(e.target.value)}
+            placeholder="Buscar por paciente o RUT…"
+            style={{ ...inputStyle, paddingLeft: 36 }} />
+        </div>
+        <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)} style={{ ...inputStyle, width: 160 }}>
+          <option value="">Todos los estados</option>
+          {Object.entries(BUDGET_STATUS).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+        </select>
+        <button onClick={() => { resetForm(); setShowForm(true); }}
+          style={{ background: COLORS.accent, color: "#fff", border: "none", borderRadius: 8, padding: "8px 18px", fontWeight: 700, cursor: "pointer", fontSize: 13, display: "flex", alignItems: "center", gap: 6 }}>
+          📋 + Nuevo presupuesto
+        </button>
+      </div>
+
+      {/* Budget list */}
+      {filtered.length === 0 ? (
+        <div style={{ textAlign: "center", padding: "60px 20px", color: COLORS.textMuted }}>
+          <div style={{ fontSize: 48, marginBottom: 12 }}>📋</div>
+          <div style={{ fontWeight: 700, fontSize: 16, marginBottom: 6 }}>Sin presupuestos</div>
+          <div style={{ fontSize: 13 }}>Crea el primer presupuesto con el botón de arriba</div>
+        </div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          {filtered.map(b => {
+            const p = getPatient(b.patientId);
+            const tot = calcTotal(b.items || [], b.discount || 0);
+            const procList = (b.items || []).map(it => it.procedure).slice(0, 3).join(", ");
+            return (
+              <div key={b.id} style={{ background: COLORS.card, border: `1px solid ${COLORS.border}`, borderRadius: 14, padding: "16px 20px" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 10 }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6, flexWrap: "wrap" }}>
+                      <span style={{ color: COLORS.textMuted, fontSize: 12, fontWeight: 700 }}>#{String(b.id).padStart(4, "0")}</span>
+                      <span style={{ color: COLORS.text, fontWeight: 700, fontSize: 15 }}>{p?.name || "Paciente"}</span>
+                      {p?.rut && <span style={{ color: COLORS.textMuted, fontSize: 12 }}>{p.rut}</span>}
+                      <BudgetStatusBadge status={b.status} />
+                    </div>
+                    <div style={{ color: COLORS.textMuted, fontSize: 12, marginBottom: 4 }}>
+                      📅 {formatDate(b.date)} {b.valid_until && `→ vence ${formatDate(b.valid_until)}`}
+                    </div>
+                    {procList && <div style={{ color: COLORS.textDim, fontSize: 12 }}>🦷 {procList}{(b.items || []).length > 3 ? ` +${(b.items || []).length - 3} más` : ""}</div>}
+                  </div>
+                  <div style={{ textAlign: "right", flexShrink: 0 }}>
+                    <div style={{ fontWeight: 800, fontSize: 20, color: COLORS.text }}>{formatCLP(tot)}</div>
+                    {b.discount > 0 && <div style={{ fontSize: 11, color: COLORS.success }}>Descuento {b.discount}% aplicado</div>}
+                    <div style={{ fontSize: 11, color: COLORS.textMuted }}>{(b.items || []).length} ítem{(b.items || []).length !== 1 ? "s" : ""}</div>
+                  </div>
+                </div>
+                {/* Actions */}
+                <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
+                  <button onClick={() => setPreview(b)}
+                    style={{ background: COLORS.accent + "18", color: COLORS.accent, border: `1px solid ${COLORS.accent}33`, borderRadius: 6, padding: "5px 12px", fontSize: 12, cursor: "pointer", fontWeight: 600 }}>
+                    👁 Ver / PDF
+                  </button>
+                  {b.status !== "aceptado" && (
+                    <button onClick={() => updateStatus(b.id, "aceptado")}
+                      style={{ background: COLORS.success + "15", color: COLORS.success, border: `1px solid ${COLORS.success}33`, borderRadius: 6, padding: "5px 12px", fontSize: 12, cursor: "pointer", fontWeight: 600 }}>
+                      ✓ Marcar aceptado
+                    </button>
+                  )}
+                  {b.status === "borrador" && (
+                    <button onClick={() => updateStatus(b.id, "enviado")}
+                      style={{ background: "#eff6ff", color: COLORS.accent, border: `1px solid ${COLORS.accent}33`, borderRadius: 6, padding: "5px 12px", fontSize: 12, cursor: "pointer", fontWeight: 600 }}>
+                      📤 Marcar enviado
+                    </button>
+                  )}
+                  {b.status !== "rechazado" && b.status !== "aceptado" && (
+                    <button onClick={() => updateStatus(b.id, "rechazado")}
+                      style={{ background: COLORS.danger + "10", color: COLORS.danger, border: `1px solid ${COLORS.danger}33`, borderRadius: 6, padding: "5px 12px", fontSize: 12, cursor: "pointer", fontWeight: 600 }}>
+                      ✕ Rechazado
+                    </button>
+                  )}
+                  <button onClick={() => deleteBudget(b.id)}
+                    style={{ background: COLORS.danger + "10", color: COLORS.danger, border: `1px solid ${COLORS.danger}22`, borderRadius: 6, padding: "5px 10px", fontSize: 12, cursor: "pointer" }}>
+                    🗑
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* ── MODAL NUEVO PRESUPUESTO ───────────────────────────────── */}
+      {showForm && (
+        <div style={{ position: "fixed", inset: 0, background: "#00000088", zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+          <div style={{ background: COLORS.surface, border: `1px solid ${COLORS.border}`, borderRadius: 18, padding: 28, width: "100%", maxWidth: 620, maxHeight: "92vh", overflowY: "auto" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+              <h3 style={{ color: COLORS.text, margin: 0 }}>📋 Nuevo Presupuesto</h3>
+              <button onClick={() => { setShowForm(false); resetForm(); }} style={{ background: "none", border: "none", color: COLORS.textMuted, cursor: "pointer", fontSize: 22 }}>×</button>
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 14 }}>
+              {/* Paciente */}
+              <div style={{ gridColumn: "1 / -1" }}>
+                <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>Paciente *</label>
+                <div style={{ position: "relative" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, background: COLORS.bg, border: `1px solid ${form.patientId ? COLORS.accent : COLORS.border}`, borderRadius: 8, padding: "8px 12px" }}>
+                    <span>👤</span>
+                    <input value={patSearch} onChange={e => handlePatSearch(e.target.value)}
+                      placeholder="Buscar por nombre o RUT…"
+                      style={{ flex: 1, border: "none", background: "transparent", outline: "none", fontSize: 13, color: COLORS.text }} />
+                    {form.patientId && <span style={{ fontSize: 11, color: COLORS.success, fontWeight: 700 }}>✓</span>}
+                  </div>
+                  {patSugg.length > 0 && (
+                    <div style={{ position: "absolute", top: "100%", left: 0, right: 0, background: COLORS.card, border: `1px solid ${COLORS.border}`, borderRadius: 10, zIndex: 300, boxShadow: "0 8px 24px rgba(0,0,0,0.12)" }}>
+                      {patSugg.map(p => (
+                        <div key={p.id} onClick={() => { setPatSearch(p.name); setForm(f => ({ ...f, patientId: String(p.id) })); setPatSugg([]); }}
+                          style={{ padding: "10px 14px", cursor: "pointer", display: "flex", justifyContent: "space-between", borderBottom: `1px solid ${COLORS.border}` }}
+                          onMouseEnter={e => e.currentTarget.style.background = COLORS.bg}
+                          onMouseLeave={e => e.currentTarget.style.background = ""}>
+                          <span style={{ fontWeight: 600, color: COLORS.text }}>{p.name}</span>
+                          {p.rut && <span style={{ color: COLORS.textMuted, fontSize: 12 }}>{p.rut}</span>}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Fecha */}
+              <div>
+                <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>Fecha emisión</label>
+                <input type="date" value={form.date} onChange={e => setForm(f => ({ ...f, date: e.target.value }))} style={inputStyle} />
+              </div>
+
+              {/* Válido hasta */}
+              <div>
+                <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>Válido hasta</label>
+                <input type="date" value={form.validUntil} onChange={e => setForm(f => ({ ...f, validUntil: e.target.value }))} style={inputStyle} />
+              </div>
+            </div>
+
+            {/* Items section */}
+            <div style={{ background: COLORS.bg, borderRadius: 12, padding: 16, marginBottom: 14 }}>
+              <div style={{ fontWeight: 700, color: COLORS.text, fontSize: 13, marginBottom: 12 }}>🦷 Procedimientos</div>
+
+              {/* Existing items */}
+              {form.items.length > 0 && (
+                <div style={{ marginBottom: 12 }}>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 60px 60px 90px 32px", gap: 6, padding: "0 4px 6px", borderBottom: `1px solid ${COLORS.border}`, marginBottom: 6 }}>
+                    {["Procedimiento", "Pieza", "Cant.", "Precio", ""].map(h => (
+                      <div key={h} style={{ fontSize: 10, color: COLORS.textMuted, fontWeight: 700 }}>{h}</div>
+                    ))}
+                  </div>
+                  {form.items.map((it, idx) => (
+                    <div key={it.id} style={{ display: "grid", gridTemplateColumns: "1fr 60px 60px 90px 32px", gap: 6, padding: "6px 4px", borderBottom: `1px solid ${COLORS.border}44`, alignItems: "center" }}>
+                      <div style={{ fontSize: 12, color: COLORS.text, fontWeight: 600 }}>{it.procedure}</div>
+                      <div style={{ fontSize: 11, color: COLORS.textMuted, textAlign: "center" }}>{it.tooth !== "-" ? it.tooth : "—"}</div>
+                      <div style={{ fontSize: 12, color: COLORS.text, textAlign: "center" }}>{it.quantity}</div>
+                      <div style={{ fontSize: 12, color: COLORS.text, textAlign: "right" }}>{formatCLP(it.quantity * it.unitPrice)}</div>
+                      <button onClick={() => setForm(f => ({ ...f, items: f.items.filter((_, i) => i !== idx) }))}
+                        style={{ background: COLORS.danger + "15", color: COLORS.danger, border: "none", borderRadius: 4, padding: "3px 7px", fontSize: 12, cursor: "pointer" }}>×</button>
+                    </div>
+                  ))}
+                  <div style={{ textAlign: "right", marginTop: 8, fontSize: 13 }}>
+                    <span style={{ color: COLORS.textMuted }}>Subtotal: </span>
+                    <span style={{ fontWeight: 700, color: COLORS.text }}>{formatCLP(calcSubtotal(form.items))}</span>
+                  </div>
+                </div>
+              )}
+
+              {/* Add item row */}
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 80px 52px 110px auto", gap: 6, alignItems: "end" }}>
+                <div>
+                  <label style={{ fontSize: 10, color: COLORS.textMuted, display: "block", marginBottom: 3 }}>Procedimiento</label>
+                  <select value={newItem.procedure} onChange={e => setNewItem(i => ({ ...i, procedure: e.target.value }))}
+                    style={{ ...inputStyle, fontSize: 12, padding: "7px 8px" }}>
+                    {treatmentCatalog.map(t => <option key={t} value={t}>{t}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label style={{ fontSize: 10, color: COLORS.textMuted, display: "block", marginBottom: 3 }}>Pieza FDI</label>
+                  <input value={newItem.tooth === "-" ? "" : newItem.tooth} onChange={e => setNewItem(i => ({ ...i, tooth: e.target.value || "-" }))}
+                    placeholder="ej: 11" style={{ ...inputStyle, fontSize: 12, padding: "7px 8px" }} />
+                </div>
+                <div>
+                  <label style={{ fontSize: 10, color: COLORS.textMuted, display: "block", marginBottom: 3 }}>Cant.</label>
+                  <input type="number" min={1} value={newItem.quantity} onChange={e => setNewItem(i => ({ ...i, quantity: Math.max(1, Number(e.target.value)) }))}
+                    style={{ ...inputStyle, fontSize: 12, padding: "7px 8px", textAlign: "center" }} />
+                </div>
+                <div>
+                  <label style={{ fontSize: 10, color: COLORS.textMuted, display: "block", marginBottom: 3 }}>Precio unit. ($)</label>
+                  <input type="number" value={newItem.unitPrice} onChange={e => setNewItem(i => ({ ...i, unitPrice: e.target.value }))}
+                    placeholder="0" style={{ ...inputStyle, fontSize: 12, padding: "7px 8px" }} />
+                </div>
+                <button onClick={addItem}
+                  style={{ background: COLORS.accent, color: "#fff", border: "none", borderRadius: 8, padding: "8px 12px", fontWeight: 700, cursor: "pointer", fontSize: 14, alignSelf: "end" }}>+</button>
+              </div>
+            </div>
+
+            {/* Discount + status + notes */}
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 14 }}>
+              <div>
+                <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>Descuento (%)</label>
+                <input type="number" min={0} max={100} value={form.discount} onChange={e => setForm(f => ({ ...f, discount: e.target.value }))}
+                  placeholder="0" style={inputStyle} />
+              </div>
+              <div>
+                <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>Estado</label>
+                <select value={form.status} onChange={e => setForm(f => ({ ...f, status: e.target.value }))} style={inputStyle}>
+                  {Object.entries(BUDGET_STATUS).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+                </select>
+              </div>
+              <div style={{ gridColumn: "1 / -1" }}>
+                <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>Notas / Condiciones</label>
+                <textarea value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))}
+                  placeholder="Condiciones del presupuesto, formas de pago, observaciones…"
+                  rows={3} style={{ ...inputStyle, resize: "vertical", fontFamily: "inherit" }} />
+              </div>
+            </div>
+
+            {/* Total preview */}
+            {form.items.length > 0 && (
+              <div style={{ background: COLORS.bg, borderRadius: 10, padding: "12px 16px", marginBottom: 18, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <div style={{ fontSize: 13, color: COLORS.textMuted }}>
+                  {form.discount > 0 && <div>Subtotal: <strong>{formatCLP(calcSubtotal(form.items))}</strong> · Descuento: <span style={{ color: COLORS.success }}>-{formatCLP(calcDiscount(form.items, Number(form.discount)))}</span></div>}
+                </div>
+                <div style={{ fontSize: 20, fontWeight: 800, color: COLORS.accent }}>TOTAL: {formatCLP(calcTotal(form.items, Number(form.discount)))}</div>
+              </div>
+            )}
+
+            <div style={{ display: "flex", gap: 10 }}>
+              <button onClick={saveBudget} style={{ flex: 1, background: COLORS.accent, color: "#fff", border: "none", borderRadius: 8, padding: "12px", fontWeight: 700, cursor: "pointer", fontSize: 15 }}>
+                ✓ Guardar presupuesto
+              </button>
+              <button onClick={() => { setShowForm(false); resetForm(); }} style={{ flex: 1, background: COLORS.card, color: COLORS.textMuted, border: `1px solid ${COLORS.border}`, borderRadius: 8, padding: "12px", cursor: "pointer" }}>
+                Cancelar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── MODAL PREVIEW / PDF ──────────────────────────────────── */}
+      {preview && (
+        <div style={{ position: "fixed", inset: 0, background: "#00000099", zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+          <div style={{ background: COLORS.surface, border: `1px solid ${COLORS.border}`, borderRadius: 18, padding: 0, width: "100%", maxWidth: 640, maxHeight: "92vh", overflowY: "auto" }}>
+
+            {/* Preview header */}
+            <div style={{ background: COLORS.sidebar, borderRadius: "18px 18px 0 0", padding: "20px 24px", display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+              <div>
+                <div style={{ color: "#fff", fontWeight: 800, fontSize: 18 }}>Clínica Olimpia</div>
+                <div style={{ color: COLORS.sidebarText, fontSize: 11, marginTop: 3 }}>Arturo Prat 350, Of. 506 · Temuco</div>
+                <div style={{ color: COLORS.sidebarText, fontSize: 11 }}>Dra. María Florencia Muñoz · Cirujano Dentista</div>
+              </div>
+              <button onClick={() => setPreview(null)} style={{ background: "#ffffff22", border: "none", color: "#fff", borderRadius: 8, padding: "6px 12px", cursor: "pointer", fontSize: 16 }}>×</button>
+            </div>
+
+            {/* Preview body */}
+            <div style={{ padding: "24px 28px" }}>
+              {/* Title + meta */}
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 20 }}>
+                <div>
+                  <div style={{ fontWeight: 800, fontSize: 20, color: COLORS.text }}>PRESUPUESTO DENTAL</div>
+                  <BudgetStatusBadge status={preview.status} />
+                </div>
+                <div style={{ textAlign: "right", fontSize: 12, color: COLORS.textMuted }}>
+                  <div style={{ fontWeight: 700, fontSize: 16, color: COLORS.accent }}>#{String(preview.id).padStart(4, "0")}</div>
+                  <div>Fecha: {formatDate(preview.date)}</div>
+                  {preview.valid_until && <div>Vence: {formatDate(preview.valid_until)}</div>}
+                </div>
+              </div>
+
+              {/* Patient info */}
+              {(() => { const p = getPatient(preview.patientId); return (
+                <div style={{ background: COLORS.bg, borderRadius: 10, padding: "12px 16px", marginBottom: 20 }}>
+                  <div style={{ fontSize: 10, fontWeight: 700, color: COLORS.textMuted, marginBottom: 4 }}>PACIENTE</div>
+                  <div style={{ fontWeight: 700, color: COLORS.text, fontSize: 15 }}>{p?.name || "—"}</div>
+                  <div style={{ color: COLORS.textMuted, fontSize: 12, marginTop: 3 }}>
+                    {[p?.rut && `🪪 ${p.rut}`, p?.phone && `📱 ${p.phone}`, p?.email && `✉️ ${p.email}`].filter(Boolean).join("  ·  ")}
+                  </div>
+                </div>
+              ); })()}
+
+              {/* Items table */}
+              <div style={{ marginBottom: 16 }}>
+                <div style={{ display: "grid", gridTemplateColumns: "32px 1fr 70px 50px 90px 90px", gap: 4, padding: "8px 10px", background: COLORS.accent, borderRadius: "8px 8px 0 0" }}>
+                  {["N°", "Procedimiento", "Pieza FDI", "Cant.", "Precio Unit.", "Subtotal"].map(h => (
+                    <div key={h} style={{ fontSize: 11, fontWeight: 700, color: "#fff", textAlign: h === "Subtotal" || h === "Precio Unit." ? "right" : h === "Cant." ? "center" : "left" }}>{h}</div>
+                  ))}
+                </div>
+                {(preview.items || []).map((it, i) => (
+                  <div key={i} style={{ display: "grid", gridTemplateColumns: "32px 1fr 70px 50px 90px 90px", gap: 4, padding: "9px 10px", background: i % 2 === 0 ? "#fff" : COLORS.bg, borderBottom: `1px solid ${COLORS.border}` }}>
+                    <div style={{ fontSize: 12, color: COLORS.textMuted, textAlign: "center" }}>{i + 1}</div>
+                    <div style={{ fontSize: 12, fontWeight: 600, color: COLORS.text }}>{it.procedure}</div>
+                    <div style={{ fontSize: 12, color: COLORS.textMuted, textAlign: "center" }}>{it.tooth !== "-" ? `FDI ${it.tooth}` : "—"}</div>
+                    <div style={{ fontSize: 12, color: COLORS.text, textAlign: "center" }}>{it.quantity}</div>
+                    <div style={{ fontSize: 12, color: COLORS.text, textAlign: "right" }}>{formatCLP(it.unitPrice)}</div>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: COLORS.text, textAlign: "right" }}>{formatCLP(it.quantity * it.unitPrice)}</div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Totals */}
+              <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 16 }}>
+                <div style={{ minWidth: 240 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", borderBottom: `1px solid ${COLORS.border}`, fontSize: 13 }}>
+                    <span style={{ color: COLORS.textMuted }}>Subtotal</span>
+                    <span style={{ fontWeight: 600 }}>{formatCLP(calcSubtotal(preview.items || []))}</span>
+                  </div>
+                  {preview.discount > 0 && (
+                    <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", borderBottom: `1px solid ${COLORS.border}`, fontSize: 13 }}>
+                      <span style={{ color: COLORS.textMuted }}>Descuento ({preview.discount}%)</span>
+                      <span style={{ color: COLORS.success, fontWeight: 600 }}>-{formatCLP(calcDiscount(preview.items || [], preview.discount))}</span>
+                    </div>
+                  )}
+                  <div style={{ display: "flex", justifyContent: "space-between", padding: "10px 14px", background: COLORS.accent, borderRadius: 8, marginTop: 6 }}>
+                    <span style={{ color: "#fff", fontWeight: 700, fontSize: 14 }}>TOTAL</span>
+                    <span style={{ color: "#fff", fontWeight: 800, fontSize: 16 }}>{formatCLP(calcTotal(preview.items || [], preview.discount || 0))}</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Notes */}
+              {preview.notes && (
+                <div style={{ background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 10, padding: "10px 14px", marginBottom: 16 }}>
+                  <div style={{ fontWeight: 700, fontSize: 11, color: COLORS.warning, marginBottom: 4 }}>OBSERVACIONES</div>
+                  <div style={{ fontSize: 13, color: COLORS.text }}>{preview.notes}</div>
+                </div>
+              )}
+
+              {/* Footer note */}
+              <div style={{ textAlign: "center", fontSize: 11, color: COLORS.textMuted, borderTop: `1px solid ${COLORS.border}`, paddingTop: 12, marginBottom: 20 }}>
+                Este presupuesto tiene validez de 30 días desde su emisión · Precios sujetos a cambio sin previo aviso
+              </div>
+
+              {/* Action buttons */}
+              <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                <button onClick={() => exportPDF(preview)}
+                  style={{ flex: 1, minWidth: 160, background: COLORS.accent, color: "#fff", border: "none", borderRadius: 8, padding: "11px 16px", fontWeight: 700, cursor: "pointer", fontSize: 14, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
+                  📄 Descargar PDF
+                </button>
+                {preview.status !== "aceptado" && (
+                  <button onClick={() => updateStatus(preview.id, "aceptado")}
+                    style={{ flex: 1, minWidth: 140, background: COLORS.success + "15", color: COLORS.success, border: `1px solid ${COLORS.success}44`, borderRadius: 8, padding: "11px 16px", fontWeight: 700, cursor: "pointer", fontSize: 14 }}>
+                    ✓ Aceptar presupuesto
+                  </button>
+                )}
+                {preview.status !== "rechazado" && preview.status !== "aceptado" && (
+                  <button onClick={() => updateStatus(preview.id, "rechazado")}
+                    style={{ background: COLORS.danger + "12", color: COLORS.danger, border: `1px solid ${COLORS.danger}33`, borderRadius: 8, padding: "11px 16px", fontWeight: 600, cursor: "pointer", fontSize: 13 }}>
+                    ✕ Rechazar
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function App() {
   // Mostrar formulario público si la URL tiene #registro
   if (window.location.hash === "#registro") return <RegistroView />;
@@ -1850,6 +2491,7 @@ export default function App() {
   const [patients, setPatients] = useState([]);
   const [appointments, setAppointments] = useState([]);
   const [treatments, setTreatments] = useState([]);
+  const [budgets, setBudgets] = useState([]);
   const [selectedPatient, setSelectedPatient] = useState(null);
   const [loading, setLoading] = useState(true);
   const [session, setSession] = useState(null);
@@ -1884,17 +2526,19 @@ export default function App() {
       supabase.from("patients").select("*").order("name"),
       supabase.from("appointments").select("*").order("date"),
       supabase.from("treatments").select("*").order("date", { ascending: false }),
-    ]).then(([p, a, t]) => {
+      supabase.from("budgets").select("*").order("id", { ascending: false }).then(r => r).catch(() => ({ data: [] })),
+    ]).then(([p, a, t, b]) => {
       setPatients(p.data || []);
       setAppointments((a.data || []).map(toAppt));
       setTreatments((t.data || []).map(toTreat));
+      setBudgets(((b && b.data) || []).map(toBudget));
       setLoading(false);
     });
   };
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
-    setPatients([]); setAppointments([]); setTreatments([]);
+    setPatients([]); setAppointments([]); setTreatments([]); setBudgets([]);
   };
 
   // ── Google Calendar ────────────────────────────────────────────────
@@ -2001,6 +2645,7 @@ export default function App() {
     { id: "agenda",       label: "Agenda",            icon: "📅" },
     { id: "patients",     label: "Pacientes",         icon: "👥" },
     { id: "treatments",   label: "Historial Clínico", icon: "🦷" },
+    { id: "budgets",      label: "Presupuestos",      icon: "📋" },
     { id: "performance",  label: "Rendimiento",       icon: "📊" },
   ];
 
@@ -2109,6 +2754,7 @@ export default function App() {
           {view === "agenda"      && <AgendaView key={agendaConfig.date + agendaConfig.filter} appointments={appointments} patients={patients} setAppointments={setAppointments} setView={setView} setSelectedPatient={setSelectedPatient} initialDate={agendaConfig.date} initialFilter={agendaConfig.filter} syncGCal={syncGCal} gcalConnected={gcalConnected} connectGCal={connectGCal} />}
           {view === "patients"    && <PatientsView patients={patients} setPatients={setPatients} appointments={appointments} treatments={treatments} setTreatments={setTreatments} selectedPatient={selectedPatient} setSelectedPatient={setSelectedPatient} />}
           {view === "treatments"  && <TreatmentsView treatments={treatments} setTreatments={setTreatments} patients={patients} />}
+          {view === "budgets"     && <BudgetView budgets={budgets} setBudgets={setBudgets} patients={patients} />}
           {view === "performance" && <PerformanceView appointments={appointments} treatments={treatments} patients={patients} />}
         </div>
       </main>
