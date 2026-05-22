@@ -522,7 +522,7 @@ function AgendaView({ appointments, patients, setAppointments, setView, setSelec
   );
 }
 
-function PatientsView({ patients, setPatients, appointments, treatments, selectedPatient, setSelectedPatient }) {
+function PatientsView({ patients, setPatients, appointments, treatments, setTreatments, selectedPatient, setSelectedPatient }) {
   const [search, setSearch] = useState("");
   const [showForm, setShowForm] = useState(false);
   const [showEditForm, setShowEditForm] = useState(false);
@@ -530,6 +530,10 @@ function PatientsView({ patients, setPatients, appointments, treatments, selecte
   const [editForm, setEditForm] = useState({ name: "", rut: "", phone: "", email: "", dob: "", address: "", notes: "" });
   const [detail, setDetail] = useState(selectedPatient || null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+
+  // Estado para modal de agregar tratamiento desde ficha
+  const [showTreatForm, setShowTreatForm] = useState(false);
+  const [treatForm, setTreatForm] = useState({ date: today(), procedure: "Limpieza dental", tooth: "-", cost: "", paid: "", status: "completado", notes: "" });
 
   // Voz
   const [isRecording, setIsRecording] = useState(false);
@@ -656,6 +660,23 @@ function PatientsView({ patients, setPatients, appointments, treatments, selecte
     if (!error) {
       setPatients(prev => prev.map(p => p.id === id ? data : p));
       setShowEditForm(false);
+    }
+  };
+
+  const saveTreatFromDetail = async (patientId) => {
+    if (!treatForm.procedure) return;
+    const costNum = Number(treatForm.cost) || 0;
+    const paidNum = Number(treatForm.paid) || 0;
+    const autoStatus = paidNum >= costNum && costNum > 0 ? "completado" : paidNum > 0 ? "pendiente pago" : treatForm.status;
+    const { data, error } = await supabase.from("treatments").insert([{
+      patient_id: patientId, date: treatForm.date, procedure: treatForm.procedure,
+      tooth: treatForm.tooth || "-", cost: costNum, paid: paidNum,
+      status: autoStatus, notes: treatForm.notes,
+    }]).select().single();
+    if (!error) {
+      setTreatments(prev => [...prev, toTreat(data)]);
+      setTreatForm({ date: today(), procedure: "Limpieza dental", tooth: "-", cost: "", paid: "", status: "completado", notes: "" });
+      setShowTreatForm(false);
     }
   };
 
@@ -806,7 +827,13 @@ function PatientsView({ patients, setPatients, appointments, treatments, selecte
           </div>
         )}
 
-        <h3 style={{ color: COLORS.text, marginBottom: 12 }}>Historial clínico</h3>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+          <h3 style={{ color: COLORS.text, margin: 0 }}>Historial clínico</h3>
+          <button onClick={() => { setTreatForm({ date: today(), procedure: "Limpieza dental", tooth: "-", cost: "", paid: "", status: "completado", notes: "" }); setShowTreatForm(true); }}
+            style={{ background: COLORS.accent, color: "#fff", border: "none", borderRadius: 8, padding: "7px 14px", fontWeight: 700, cursor: "pointer", fontSize: 13, display: "flex", alignItems: "center", gap: 6 }}>
+            🦷 + Agregar tratamiento
+          </button>
+        </div>
         {pTreat.length === 0 ? <div style={{ color: COLORS.textDim }}>Sin tratamientos registrados</div> : (
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             {pTreat.map(t => (
@@ -823,6 +850,77 @@ function PatientsView({ patients, setPatients, appointments, treatments, selecte
                 </div>
               </div>
             ))}
+          </div>
+        )}
+
+        {/* Modal agregar tratamiento desde ficha del paciente */}
+        {showTreatForm && (
+          <div style={{ position: "fixed", inset: 0, background: "#00000088", zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+            <div style={{ background: COLORS.surface, border: `1px solid ${COLORS.border}`, borderRadius: 16, padding: 28, width: "100%", maxWidth: 480, maxHeight: "90vh", overflowY: "auto" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+                <h3 style={{ color: COLORS.text, margin: 0 }}>🦷 Nuevo Tratamiento</h3>
+                <button onClick={() => setShowTreatForm(false)} style={{ background: "none", border: "none", color: COLORS.textMuted, cursor: "pointer", fontSize: 20 }}>×</button>
+              </div>
+
+              {/* Paciente pre-seleccionado */}
+              <div style={{ background: COLORS.accent + "15", border: `1px solid ${COLORS.accent}33`, borderRadius: 10, padding: "10px 14px", marginBottom: 18, display: "flex", alignItems: "center", gap: 10 }}>
+                <span style={{ fontSize: 18 }}>👤</span>
+                <div>
+                  <div style={{ color: COLORS.accent, fontSize: 11, fontWeight: 700 }}>PACIENTE</div>
+                  <div style={{ color: COLORS.text, fontWeight: 700, fontSize: 14 }}>{p.name}</div>
+                  {p.rut && <div style={{ color: COLORS.textMuted, fontSize: 12 }}>{p.rut}</div>}
+                </div>
+              </div>
+
+              <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+                <div>
+                  <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>Fecha</label>
+                  <input type="date" value={treatForm.date} onChange={e => setTreatForm(f => ({ ...f, date: e.target.value }))} style={inputStyle} />
+                </div>
+                <div>
+                  <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>Procedimiento</label>
+                  <select value={treatForm.procedure} onChange={e => setTreatForm(f => ({ ...f, procedure: e.target.value }))} style={inputStyle}>
+                    {treatmentCatalog.map(t => <option key={t} value={t}>{t}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 6 }}>Pieza(s) dental(es) — Nomenclatura FDI</label>
+                  <ToothSelector value={treatForm.tooth} onChange={v => setTreatForm(f => ({ ...f, tooth: v }))} />
+                </div>
+                <div style={{ display: "flex", gap: 10 }}>
+                  <div style={{ flex: 1 }}>
+                    <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>Costo total ($)</label>
+                    <input type="number" value={treatForm.cost} onChange={e => setTreatForm(f => ({ ...f, cost: e.target.value }))} placeholder="0" style={inputStyle} />
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>Monto pagado ($)</label>
+                    <input type="number" value={treatForm.paid} onChange={e => setTreatForm(f => ({ ...f, paid: e.target.value }))} placeholder="0" style={inputStyle} />
+                  </div>
+                </div>
+                <div>
+                  <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>Estado</label>
+                  <select value={treatForm.status} onChange={e => setTreatForm(f => ({ ...f, status: e.target.value }))} style={inputStyle}>
+                    <option value="completado">Completado</option>
+                    <option value="pendiente pago">Pendiente de pago</option>
+                    <option value="en proceso">En proceso</option>
+                    <option value="planificado">Planificado</option>
+                  </select>
+                </div>
+                <div>
+                  <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>Notas</label>
+                  <input type="text" value={treatForm.notes} onChange={e => setTreatForm(f => ({ ...f, notes: e.target.value }))} placeholder="Observaciones, materiales usados…" style={inputStyle} />
+                </div>
+              </div>
+
+              <div style={{ display: "flex", gap: 10, marginTop: 22 }}>
+                <button onClick={() => saveTreatFromDetail(p.id)} style={{ flex: 1, background: COLORS.accent, color: "#fff", border: "none", borderRadius: 8, padding: "11px", fontWeight: 700, cursor: "pointer", fontSize: 15 }}>
+                  ✓ Guardar tratamiento
+                </button>
+                <button onClick={() => setShowTreatForm(false)} style={{ flex: 1, background: COLORS.card, color: COLORS.textMuted, border: `1px solid ${COLORS.border}`, borderRadius: 8, padding: "11px", cursor: "pointer" }}>
+                  Cancelar
+                </button>
+              </div>
+            </div>
           </div>
         )}
       </div>
@@ -2009,7 +2107,7 @@ export default function App() {
         <div style={{ padding: "28px 28px", flex: 1, maxWidth: 900, width: "100%" }}>
           {view === "dashboard"   && <DashboardView appointments={appointments} treatments={treatments} patients={patients} setView={setView} setAgendaConfig={setAgendaConfig} />}
           {view === "agenda"      && <AgendaView key={agendaConfig.date + agendaConfig.filter} appointments={appointments} patients={patients} setAppointments={setAppointments} setView={setView} setSelectedPatient={setSelectedPatient} initialDate={agendaConfig.date} initialFilter={agendaConfig.filter} syncGCal={syncGCal} gcalConnected={gcalConnected} connectGCal={connectGCal} />}
-          {view === "patients"    && <PatientsView patients={patients} setPatients={setPatients} appointments={appointments} treatments={treatments} selectedPatient={selectedPatient} setSelectedPatient={setSelectedPatient} />}
+          {view === "patients"    && <PatientsView patients={patients} setPatients={setPatients} appointments={appointments} treatments={treatments} setTreatments={setTreatments} selectedPatient={selectedPatient} setSelectedPatient={setSelectedPatient} />}
           {view === "treatments"  && <TreatmentsView treatments={treatments} setTreatments={setTreatments} patients={patients} />}
           {view === "performance" && <PerformanceView appointments={appointments} treatments={treatments} patients={patients} />}
         </div>
