@@ -1865,6 +1865,575 @@ function BudgetStatusBadge({ status }) {
   );
 }
 
+// ── Módulo Estética Dental ─────────────────────────────────────────
+const AESTHETIC_CATALOG = [
+  { name: "Blanqueamiento LED en clínica",  icon: "✨", sessions: 1  },
+  { name: "Blanqueamiento en casa (kit)",   icon: "🏠", sessions: 3  },
+  { name: "Carillas de porcelana",          icon: "💎", sessions: 3  },
+  { name: "Carillas de composite",          icon: "🦷", sessions: 2  },
+  { name: "Diseño de sonrisa digital",      icon: "😁", sessions: 4  },
+  { name: "Ortodoncia metálica",            icon: "🔧", sessions: 24 },
+  { name: "Ortodoncia cerámica",            icon: "🔮", sessions: 24 },
+  { name: "Alineadores invisibles",         icon: "🫧", sessions: 12 },
+  { name: "Corona cerámica estética",       icon: "👑", sessions: 2  },
+  { name: "Implante + corona estética",     icon: "⚙️", sessions: 4  },
+  { name: "Contorneado y remodelado",       icon: "✏️", sessions: 1  },
+  { name: "Cierre de diastemas",            icon: "🔗", sessions: 1  },
+  { name: "Sonrisa Hollywood",              icon: "⭐", sessions: 6  },
+  { name: "Toxina botulínica dental",       icon: "💉", sessions: 1  },
+  { name: "Gingivoplastia estética",        icon: "🌸", sessions: 2  },
+];
+
+const AESTHETIC_STATUS = {
+  planificado:  { label: "Planificado",    color: "#64748b", bg: "#f1f5f9" },
+  "en proceso": { label: "En proceso",     color: "#d97706", bg: "#fffbeb" },
+  completado:   { label: "Completado ✓",   color: "#059669", bg: "#f0fdf4" },
+  pausado:      { label: "Pausado",        color: "#7c3aed", bg: "#f5f3ff" },
+  cancelado:    { label: "Cancelado",      color: "#dc2626", bg: "#fff1f2" },
+};
+
+const toAesthetic = (r) => ({ ...r, patientId: r.patient_id, session_log: r.session_log || [] });
+
+function AestheticStatusBadge({ status }) {
+  const s = AESTHETIC_STATUS[status] || AESTHETIC_STATUS.planificado;
+  return (
+    <span style={{ background: s.bg, color: s.color, border: `1px solid ${s.color}33`,
+      borderRadius: 20, padding: "3px 10px", fontSize: 11, fontWeight: 700 }}>{s.label}</span>
+  );
+}
+
+function AestheticView({ aestheticCases, setAestheticCases, patients }) {
+  const getPatient = (id) => patients.find(p => p.id === Number(id));
+  const getCatalog = (name) => AESTHETIC_CATALOG.find(c => c.name === name) || { icon: "🦷", sessions: 1 };
+
+  // List filters
+  const [search, setSearch]               = useState("");
+  const [filterStatus, setFilterStatus]   = useState("");
+  const [filterTreat, setFilterTreat]     = useState("");
+
+  // Create form
+  const [showForm, setShowForm]           = useState(false);
+  const [patSearch, setPatSearch]         = useState("");
+  const [patSugg, setPatSugg]             = useState([]);
+  const defaultForm = () => ({
+    patientId: "", treatment: AESTHETIC_CATALOG[0].name,
+    start_date: today(), end_date: "",
+    sessions_total: AESTHETIC_CATALOG[0].sessions, sessions_done: 0,
+    cost: "", paid: "", status: "planificado",
+    goals: "", notes: "", photo_before: "", photo_after: "",
+  });
+  const [form, setForm] = useState(defaultForm);
+
+  // Detail modal
+  const [detail, setDetail]               = useState(null);
+  const [showAddSession, setShowAddSession] = useState(false);
+  const [sessionNote, setSessionNote]     = useState("");
+
+  // Patient search
+  const handlePatSearch = (val) => {
+    setPatSearch(val);
+    setForm(f => ({ ...f, patientId: "" }));
+    if (!val.trim()) { setPatSugg([]); return; }
+    const q = val.toLowerCase().replace(/\./g, "").replace(/-/g, "");
+    setPatSugg(patients.filter(p =>
+      p.name?.toLowerCase().includes(q) ||
+      p.rut?.replace(/\./g,"").replace(/-/g,"").toLowerCase().includes(q)
+    ).slice(0, 6));
+  };
+
+  // When treatment changes, update default sessions
+  const handleTreatmentChange = (name) => {
+    const cat = getCatalog(name);
+    setForm(f => ({ ...f, treatment: name, sessions_total: cat.sessions }));
+  };
+
+  // Save new case
+  const saveCase = async () => {
+    if (!form.patientId) { alert("Selecciona un paciente."); return; }
+    const { data, error } = await supabase.from("aesthetic_cases").insert([{
+      patient_id: Number(form.patientId),
+      treatment: form.treatment,
+      start_date: form.start_date,
+      end_date: form.end_date || null,
+      sessions_total: Number(form.sessions_total) || 1,
+      sessions_done: 0,
+      cost: Number(form.cost) || 0,
+      paid: Number(form.paid) || 0,
+      status: form.status,
+      goals: form.goals,
+      notes: form.notes,
+      photo_before: form.photo_before,
+      photo_after: form.photo_after,
+      session_log: [],
+    }]).select().single();
+    if (!error) {
+      setAestheticCases(prev => [toAesthetic(data), ...prev]);
+      setForm(defaultForm()); setPatSearch(""); setPatSugg([]);
+      setShowForm(false);
+    } else alert("Error: " + error.message);
+  };
+
+  // Add session to detail case
+  const addSessionToCase = async () => {
+    if (!sessionNote.trim()) return;
+    const c = detail;
+    const num = (c.sessions_done || 0) + 1;
+    const newLog = [...(c.session_log || []), { date: today(), note: sessionNote, number: num }];
+    const newDone = Math.min(num, c.sessions_total || 1);
+    const autoStatus = newDone >= (c.sessions_total || 1) ? "completado" : "en proceso";
+    await supabase.from("aesthetic_cases").update({ session_log: newLog, sessions_done: newDone, status: autoStatus }).eq("id", c.id);
+    const updated = { ...c, session_log: newLog, sessions_done: newDone, status: autoStatus };
+    setAestheticCases(prev => prev.map(x => x.id === c.id ? updated : x));
+    setDetail(updated);
+    setSessionNote(""); setShowAddSession(false);
+  };
+
+  // Update payment
+  const updatePayment = async (id, paid) => {
+    const paidNum = Number(paid) || 0;
+    await supabase.from("aesthetic_cases").update({ paid: paidNum }).eq("id", id);
+    setAestheticCases(prev => prev.map(x => x.id === id ? { ...x, paid: paidNum } : x));
+    setDetail(prev => prev?.id === id ? { ...prev, paid: paidNum } : prev);
+  };
+
+  // Update status
+  const updateStatus = async (id, status) => {
+    await supabase.from("aesthetic_cases").update({ status }).eq("id", id);
+    setAestheticCases(prev => prev.map(x => x.id === id ? { ...x, status } : x));
+    setDetail(prev => prev?.id === id ? { ...prev, status } : prev);
+  };
+
+  // Delete case
+  const deleteCase = async (id) => {
+    if (!window.confirm("¿Eliminar este caso estético?")) return;
+    await supabase.from("aesthetic_cases").delete().eq("id", id);
+    setAestheticCases(prev => prev.filter(x => x.id !== id));
+    if (detail?.id === id) setDetail(null);
+  };
+
+  // Filtered list
+  const filtered = [...aestheticCases]
+    .filter(c => {
+      const p = getPatient(c.patientId);
+      const q = search.toLowerCase();
+      return (!search || (p?.name || "").toLowerCase().includes(q) || (p?.rut || "").includes(q))
+        && (!filterStatus || c.status === filterStatus)
+        && (!filterTreat  || c.treatment === filterTreat);
+    })
+    .sort((a, b) => b.id - a.id);
+
+  // Stats
+  const enProceso  = aestheticCases.filter(c => c.status === "en proceso").length;
+  const completados = aestheticCases.filter(c => c.status === "completado").length;
+  const totalBilled = aestheticCases.reduce((s, c) => s + (c.cost || 0), 0);
+  const totalPaid   = aestheticCases.reduce((s, c) => s + (c.paid || 0), 0);
+
+  return (
+    <div>
+      {/* Stats */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px,1fr))", gap: 12, marginBottom: 22 }}>
+        {[
+          { label: "Total casos",    value: aestheticCases.length, color: "#7c3aed", bg: "#f5f3ff", icon: "✨" },
+          { label: "En proceso",     value: enProceso,             color: COLORS.warning, bg: "#fffbeb", icon: "⏳" },
+          { label: "Completados",    value: completados,           color: COLORS.success, bg: "#f0fdf4", icon: "✅" },
+          { label: "Facturado",      value: formatCLP(totalBilled),color: COLORS.accent,  bg: "#eff6ff", icon: "💰" },
+          { label: "Cobrado",        value: formatCLP(totalPaid),  color: COLORS.success, bg: "#f0fdf4", icon: "✓"  },
+        ].map(s => (
+          <div key={s.label} style={{ background: s.bg, border: `1px solid ${s.color}22`, borderRadius: 12, padding: "14px 16px" }}>
+            <div style={{ fontSize: 20, marginBottom: 4 }}>{s.icon}</div>
+            <div style={{ fontWeight: 800, fontSize: 18, color: s.color }}>{s.value}</div>
+            <div style={{ fontSize: 11, color: COLORS.textMuted, marginTop: 2 }}>{s.label}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* Toolbar */}
+      <div style={{ display: "flex", gap: 10, marginBottom: 18, flexWrap: "wrap" }}>
+        <div style={{ position: "relative", flex: 1, minWidth: 180 }}>
+          <span style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", fontSize: 14 }}>🔍</span>
+          <input value={search} onChange={e => setSearch(e.target.value)}
+            placeholder="Buscar paciente…"
+            style={{ ...inputStyle, paddingLeft: 36 }} />
+        </div>
+        <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)} style={{ ...inputStyle, width: 150 }}>
+          <option value="">Todos los estados</option>
+          {Object.entries(AESTHETIC_STATUS).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+        </select>
+        <select value={filterTreat} onChange={e => setFilterTreat(e.target.value)} style={{ ...inputStyle, width: 180 }}>
+          <option value="">Todos los tratamientos</option>
+          {AESTHETIC_CATALOG.map(c => <option key={c.name} value={c.name}>{c.icon} {c.name}</option>)}
+        </select>
+        <button onClick={() => { setForm(defaultForm()); setPatSearch(""); setPatSugg([]); setShowForm(true); }}
+          style={{ background: "#7c3aed", color: "#fff", border: "none", borderRadius: 8, padding: "8px 18px", fontWeight: 700, cursor: "pointer", fontSize: 13, display: "flex", alignItems: "center", gap: 6 }}>
+          ✨ + Nuevo caso
+        </button>
+      </div>
+
+      {/* Case cards */}
+      {filtered.length === 0 ? (
+        <div style={{ textAlign: "center", padding: "60px 20px", color: COLORS.textMuted }}>
+          <div style={{ fontSize: 52, marginBottom: 12 }}>✨</div>
+          <div style={{ fontWeight: 700, fontSize: 16, marginBottom: 6 }}>Sin casos estéticos</div>
+          <div style={{ fontSize: 13 }}>Registra el primer caso con el botón de arriba</div>
+        </div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          {filtered.map(c => {
+            const p = getPatient(c.patientId);
+            const cat = getCatalog(c.treatment);
+            const pct = c.sessions_total > 0 ? Math.round((c.sessions_done / c.sessions_total) * 100) : 0;
+            const debt = (c.cost || 0) - (c.paid || 0);
+            return (
+              <div key={c.id} style={{ background: COLORS.card, border: `1px solid ${COLORS.border}`, borderRadius: 14, padding: "18px 20px", cursor: "pointer" }}
+                onClick={() => setDetail(c)}>
+                <div style={{ display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
+                  {/* Left info */}
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8, flexWrap: "wrap" }}>
+                      <span style={{ fontSize: 24 }}>{cat.icon}</span>
+                      <div>
+                        <div style={{ fontWeight: 700, fontSize: 15, color: COLORS.text }}>{c.treatment}</div>
+                        <div style={{ fontSize: 13, color: COLORS.textMuted }}>{p?.name || "—"} {p?.rut && <span style={{ fontSize: 11 }}>· {p.rut}</span>}</div>
+                      </div>
+                      <AestheticStatusBadge status={c.status} />
+                    </div>
+                    {/* Session progress */}
+                    <div style={{ marginBottom: 6 }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: COLORS.textMuted, marginBottom: 4 }}>
+                        <span>Sesiones: {c.sessions_done}/{c.sessions_total}</span>
+                        <span>{pct}%</span>
+                      </div>
+                      <div style={{ height: 8, background: COLORS.border, borderRadius: 4, overflow: "hidden" }}>
+                        <div style={{ height: "100%", width: `${pct}%`, background: c.status === "completado" ? COLORS.success : "#7c3aed", borderRadius: 4, transition: "width 0.4s" }} />
+                      </div>
+                    </div>
+                    <div style={{ fontSize: 12, color: COLORS.textMuted }}>
+                      📅 Inicio: {formatDate(c.start_date)} {c.end_date && `→ ${formatDate(c.end_date)}`}
+                    </div>
+                    {c.goals && <div style={{ fontSize: 12, color: COLORS.textDim, marginTop: 4, fontStyle: "italic" }}>🎯 {c.goals}</div>}
+                  </div>
+                  {/* Right costs */}
+                  <div style={{ textAlign: "right", flexShrink: 0 }}>
+                    <div style={{ fontWeight: 800, fontSize: 18, color: COLORS.text }}>{formatCLP(c.cost)}</div>
+                    <div style={{ fontSize: 12, color: debt > 0 ? COLORS.danger : COLORS.success, marginTop: 2 }}>
+                      {debt > 0 ? `Debe: ${formatCLP(debt)}` : "✓ Pagado"}
+                    </div>
+                    {(c.photo_before || c.photo_after) && (
+                      <div style={{ marginTop: 6, fontSize: 11, color: "#7c3aed" }}>📷 Fotos adjuntas</div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* ── MODAL NUEVO CASO ─────────────────────────────────────── */}
+      {showForm && (
+        <div style={{ position: "fixed", inset: 0, background: "#00000099", zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+          <div style={{ background: COLORS.surface, border: `1px solid ${COLORS.border}`, borderRadius: 18, padding: 28, width: "100%", maxWidth: 580, maxHeight: "92vh", overflowY: "auto" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+              <h3 style={{ color: COLORS.text, margin: 0 }}>✨ Nuevo Caso Estético</h3>
+              <button onClick={() => setShowForm(false)} style={{ background: "none", border: "none", color: COLORS.textMuted, cursor: "pointer", fontSize: 22 }}>×</button>
+            </div>
+
+            <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+              {/* Paciente */}
+              <div>
+                <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>Paciente *</label>
+                <div style={{ position: "relative" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, background: COLORS.bg, border: `1px solid ${form.patientId ? "#7c3aed" : COLORS.border}`, borderRadius: 8, padding: "8px 12px" }}>
+                    <span>👤</span>
+                    <input value={patSearch} onChange={e => handlePatSearch(e.target.value)}
+                      placeholder="Buscar por nombre o RUT…"
+                      style={{ flex: 1, border: "none", background: "transparent", outline: "none", fontSize: 13, color: COLORS.text }} />
+                    {form.patientId && <span style={{ fontSize: 11, color: "#7c3aed", fontWeight: 700 }}>✓</span>}
+                  </div>
+                  {patSugg.length > 0 && (
+                    <div style={{ position: "absolute", top: "100%", left: 0, right: 0, background: COLORS.card, border: `1px solid ${COLORS.border}`, borderRadius: 10, zIndex: 300, boxShadow: "0 8px 24px rgba(0,0,0,0.12)" }}>
+                      {patSugg.map(pp => (
+                        <div key={pp.id} onClick={() => { setPatSearch(pp.name); setForm(f => ({ ...f, patientId: String(pp.id) })); setPatSugg([]); }}
+                          style={{ padding: "10px 14px", cursor: "pointer", display: "flex", justifyContent: "space-between", borderBottom: `1px solid ${COLORS.border}` }}
+                          onMouseEnter={e => e.currentTarget.style.background = COLORS.bg}
+                          onMouseLeave={e => e.currentTarget.style.background = ""}>
+                          <span style={{ fontWeight: 600, color: COLORS.text }}>{pp.name}</span>
+                          {pp.rut && <span style={{ color: COLORS.textMuted, fontSize: 12 }}>{pp.rut}</span>}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Tratamiento */}
+              <div>
+                <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>Tratamiento estético</label>
+                <select value={form.treatment} onChange={e => handleTreatmentChange(e.target.value)} style={inputStyle}>
+                  {AESTHETIC_CATALOG.map(c => <option key={c.name} value={c.name}>{c.icon} {c.name}</option>)}
+                </select>
+              </div>
+
+              {/* Fechas */}
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                <div>
+                  <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>Fecha de inicio</label>
+                  <input type="date" value={form.start_date} onChange={e => setForm(f => ({ ...f, start_date: e.target.value }))} style={inputStyle} />
+                </div>
+                <div>
+                  <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>Fecha estimada fin</label>
+                  <input type="date" value={form.end_date} onChange={e => setForm(f => ({ ...f, end_date: e.target.value }))} style={inputStyle} />
+                </div>
+              </div>
+
+              {/* Sesiones y costo */}
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
+                <div>
+                  <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>Sesiones planificadas</label>
+                  <input type="number" min={1} value={form.sessions_total} onChange={e => setForm(f => ({ ...f, sessions_total: e.target.value }))} style={inputStyle} />
+                </div>
+                <div>
+                  <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>Costo total ($)</label>
+                  <input type="number" value={form.cost} onChange={e => setForm(f => ({ ...f, cost: e.target.value }))} placeholder="0" style={inputStyle} />
+                </div>
+                <div>
+                  <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>Pagado ($)</label>
+                  <input type="number" value={form.paid} onChange={e => setForm(f => ({ ...f, paid: e.target.value }))} placeholder="0" style={inputStyle} />
+                </div>
+              </div>
+
+              {/* Estado */}
+              <div>
+                <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>Estado inicial</label>
+                <select value={form.status} onChange={e => setForm(f => ({ ...f, status: e.target.value }))} style={inputStyle}>
+                  {Object.entries(AESTHETIC_STATUS).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+                </select>
+              </div>
+
+              {/* Objetivos */}
+              <div>
+                <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>Objetivos / Expectativas del paciente</label>
+                <input type="text" value={form.goals} onChange={e => setForm(f => ({ ...f, goals: e.target.value }))}
+                  placeholder="Ej: mejorar color, cerrar espacios, sonrisa más armónica…" style={inputStyle} />
+              </div>
+
+              {/* Fotos */}
+              <div style={{ background: COLORS.bg, borderRadius: 10, padding: "12px 14px" }}>
+                <div style={{ fontWeight: 700, color: COLORS.textMuted, fontSize: 12, marginBottom: 10 }}>📷 Fotos (URL de imagen)</div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                  <div>
+                    <label style={{ color: COLORS.textMuted, fontSize: 11, display: "block", marginBottom: 3 }}>Foto ANTES (URL)</label>
+                    <input type="url" value={form.photo_before} onChange={e => setForm(f => ({ ...f, photo_before: e.target.value }))}
+                      placeholder="https://…" style={{ ...inputStyle, fontSize: 11 }} />
+                  </div>
+                  <div>
+                    <label style={{ color: COLORS.textMuted, fontSize: 11, display: "block", marginBottom: 3 }}>Foto DESPUÉS (URL)</label>
+                    <input type="url" value={form.photo_after} onChange={e => setForm(f => ({ ...f, photo_after: e.target.value }))}
+                      placeholder="https://…" style={{ ...inputStyle, fontSize: 11 }} />
+                  </div>
+                </div>
+              </div>
+
+              {/* Notas */}
+              <div>
+                <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>Notas clínicas</label>
+                <textarea value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))}
+                  placeholder="Observaciones, indicaciones previas, consideraciones…"
+                  rows={3} style={{ ...inputStyle, resize: "vertical", fontFamily: "inherit" }} />
+              </div>
+            </div>
+
+            <div style={{ display: "flex", gap: 10, marginTop: 22 }}>
+              <button onClick={saveCase}
+                style={{ flex: 1, background: "#7c3aed", color: "#fff", border: "none", borderRadius: 8, padding: "12px", fontWeight: 700, cursor: "pointer", fontSize: 15 }}>
+                ✓ Guardar caso
+              </button>
+              <button onClick={() => setShowForm(false)}
+                style={{ flex: 1, background: COLORS.card, color: COLORS.textMuted, border: `1px solid ${COLORS.border}`, borderRadius: 8, padding: "12px", cursor: "pointer" }}>
+                Cancelar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── MODAL DETALLE / SESIONES ──────────────────────────────── */}
+      {detail && (
+        <div style={{ position: "fixed", inset: 0, background: "#00000099", zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+          <div style={{ background: COLORS.surface, border: `1px solid ${COLORS.border}`, borderRadius: 18, width: "100%", maxWidth: 600, maxHeight: "92vh", overflowY: "auto" }}>
+            {/* Header */}
+            <div style={{ background: "linear-gradient(135deg, #7c3aed 0%, #5b21b6 100%)", borderRadius: "18px 18px 0 0", padding: "20px 24px" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                <div>
+                  <div style={{ fontSize: 32, marginBottom: 4 }}>{getCatalog(detail.treatment).icon}</div>
+                  <div style={{ color: "#fff", fontWeight: 800, fontSize: 18 }}>{detail.treatment}</div>
+                  <div style={{ color: "#ddd6fe", fontSize: 13, marginTop: 4 }}>
+                    {getPatient(detail.patientId)?.name} · {getPatient(detail.patientId)?.rut}
+                  </div>
+                </div>
+                <button onClick={() => setDetail(null)}
+                  style={{ background: "#ffffff22", border: "none", color: "#fff", borderRadius: 8, padding: "6px 12px", cursor: "pointer", fontSize: 16 }}>×</button>
+              </div>
+              {/* Progress bar in header */}
+              <div style={{ marginTop: 14 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", color: "#ddd6fe", fontSize: 12, marginBottom: 6 }}>
+                  <span>Progreso: {detail.sessions_done}/{detail.sessions_total} sesiones</span>
+                  <span>{detail.sessions_total > 0 ? Math.round(detail.sessions_done/detail.sessions_total*100) : 0}%</span>
+                </div>
+                <div style={{ height: 10, background: "#ffffff33", borderRadius: 5, overflow: "hidden" }}>
+                  <div style={{ height: "100%", width: `${detail.sessions_total > 0 ? Math.round(detail.sessions_done/detail.sessions_total*100) : 0}%`, background: "#a78bfa", borderRadius: 5, transition: "width 0.4s" }} />
+                </div>
+              </div>
+            </div>
+
+            <div style={{ padding: "24px 24px" }}>
+              {/* Info grid */}
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 20 }}>
+                {[
+                  { label: "Estado",       value: <AestheticStatusBadge status={detail.status} /> },
+                  { label: "Inicio",       value: formatDate(detail.start_date) },
+                  { label: "Fin estimado", value: detail.end_date ? formatDate(detail.end_date) : "—" },
+                  { label: "Costo total",  value: formatCLP(detail.cost) },
+                ].map(row => (
+                  <div key={row.label} style={{ background: COLORS.bg, borderRadius: 8, padding: "10px 14px" }}>
+                    <div style={{ fontSize: 10, color: COLORS.textMuted, fontWeight: 700, marginBottom: 4 }}>{row.label.toUpperCase()}</div>
+                    <div style={{ fontWeight: 600, color: COLORS.text, fontSize: 13 }}>{row.value}</div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Payment bar */}
+              <div style={{ background: COLORS.bg, borderRadius: 10, padding: "14px 16px", marginBottom: 20 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                  <span style={{ fontWeight: 700, color: COLORS.text, fontSize: 13 }}>💳 Pagos</span>
+                  <span style={{ color: (detail.cost - detail.paid) > 0 ? COLORS.danger : COLORS.success, fontWeight: 700, fontSize: 13 }}>
+                    {(detail.cost - detail.paid) > 0 ? `Debe: ${formatCLP(detail.cost - detail.paid)}` : "✓ Pagado completo"}
+                  </span>
+                </div>
+                <div style={{ height: 8, background: COLORS.border, borderRadius: 4, overflow: "hidden", marginBottom: 10 }}>
+                  <div style={{ height: "100%", width: `${detail.cost > 0 ? Math.min(100, Math.round(detail.paid/detail.cost*100)) : 0}%`, background: COLORS.success, borderRadius: 4 }} />
+                </div>
+                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                  <span style={{ fontSize: 12, color: COLORS.textMuted, flexShrink: 0 }}>Pagado: {formatCLP(detail.paid)} / {formatCLP(detail.cost)}</span>
+                  <input type="number" defaultValue={detail.paid} onBlur={e => updatePayment(detail.id, e.target.value)}
+                    style={{ ...inputStyle, width: 110, fontSize: 12, padding: "5px 8px", marginLeft: "auto" }}
+                    placeholder="Actualizar pago" />
+                </div>
+              </div>
+
+              {/* Objectives & Notes */}
+              {detail.goals && (
+                <div style={{ background: "#f5f3ff", border: "1px solid #ddd6fe", borderRadius: 10, padding: "10px 14px", marginBottom: 14 }}>
+                  <div style={{ fontSize: 10, fontWeight: 700, color: "#7c3aed", marginBottom: 4 }}>🎯 OBJETIVOS</div>
+                  <div style={{ fontSize: 13, color: COLORS.text }}>{detail.goals}</div>
+                </div>
+              )}
+              {detail.notes && (
+                <div style={{ background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 10, padding: "10px 14px", marginBottom: 14 }}>
+                  <div style={{ fontSize: 10, fontWeight: 700, color: COLORS.warning, marginBottom: 4 }}>📋 NOTAS CLÍNICAS</div>
+                  <div style={{ fontSize: 13, color: COLORS.text }}>{detail.notes}</div>
+                </div>
+              )}
+
+              {/* Before/After photos */}
+              {(detail.photo_before || detail.photo_after) && (
+                <div style={{ marginBottom: 20 }}>
+                  <div style={{ fontWeight: 700, fontSize: 13, color: COLORS.text, marginBottom: 10 }}>📷 Fotografías</div>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                    {["before", "after"].map(type => {
+                      const url = type === "before" ? detail.photo_before : detail.photo_after;
+                      const label = type === "before" ? "ANTES" : "DESPUÉS";
+                      return (
+                        <div key={type} style={{ background: COLORS.bg, borderRadius: 10, overflow: "hidden", border: `1px solid ${COLORS.border}` }}>
+                          <div style={{ padding: "6px 10px", fontSize: 10, fontWeight: 700, color: type === "before" ? COLORS.warning : COLORS.success, background: type === "before" ? "#fffbeb" : "#f0fdf4" }}>
+                            {label}
+                          </div>
+                          {url ? (
+                            <img src={url} alt={label} style={{ width: "100%", height: 140, objectFit: "cover", display: "block" }}
+                              onError={e => { e.target.style.display = "none"; }} />
+                          ) : (
+                            <div style={{ height: 100, display: "flex", alignItems: "center", justifyContent: "center", color: COLORS.textDim, fontSize: 12 }}>Sin foto</div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* Session log */}
+              <div>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+                  <div style={{ fontWeight: 700, fontSize: 14, color: COLORS.text }}>📅 Registro de sesiones</div>
+                  {detail.status !== "completado" && detail.status !== "cancelado" && (
+                    <button onClick={() => setShowAddSession(true)}
+                      style={{ background: "#7c3aed", color: "#fff", border: "none", borderRadius: 8, padding: "6px 14px", fontWeight: 700, cursor: "pointer", fontSize: 12 }}>
+                      + Registrar sesión
+                    </button>
+                  )}
+                </div>
+
+                {/* Add session form */}
+                {showAddSession && (
+                  <div style={{ background: "#f5f3ff", border: "1px dashed #7c3aed55", borderRadius: 10, padding: "12px 14px", marginBottom: 12 }}>
+                    <div style={{ fontWeight: 700, fontSize: 12, color: "#7c3aed", marginBottom: 8 }}>
+                      Sesión #{(detail.sessions_done || 0) + 1} · {new Date().toLocaleDateString("es-CL", { day: "numeric", month: "long", year: "numeric" })}
+                    </div>
+                    <textarea value={sessionNote} onChange={e => setSessionNote(e.target.value)}
+                      placeholder="Describe lo realizado en esta sesión: procedimientos, observaciones, indicaciones post-tratamiento…"
+                      rows={3} style={{ ...inputStyle, width: "100%", resize: "vertical", fontFamily: "inherit", marginBottom: 8, boxSizing: "border-box" }} />
+                    <div style={{ display: "flex", gap: 8 }}>
+                      <button onClick={addSessionToCase}
+                        style={{ background: "#7c3aed", color: "#fff", border: "none", borderRadius: 8, padding: "8px 16px", fontWeight: 700, cursor: "pointer", fontSize: 13 }}>
+                        ✓ Guardar sesión
+                      </button>
+                      <button onClick={() => { setShowAddSession(false); setSessionNote(""); }}
+                        style={{ background: "none", border: `1px solid ${COLORS.border}`, color: COLORS.textMuted, borderRadius: 8, padding: "8px 12px", cursor: "pointer", fontSize: 13 }}>
+                        Cancelar
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Session history */}
+                {(detail.session_log || []).length === 0 ? (
+                  <div style={{ color: COLORS.textDim, fontSize: 13, padding: "12px 0" }}>Sin sesiones registradas aún.</div>
+                ) : (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                    {[...(detail.session_log || [])].reverse().map((s, i) => (
+                      <div key={i} style={{ background: COLORS.card, border: `1px solid ${COLORS.border}`, borderRadius: 10, padding: "12px 16px", display: "flex", gap: 12 }}>
+                        <div style={{ width: 28, height: 28, borderRadius: "50%", background: "#7c3aed", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 800, flexShrink: 0 }}>
+                          {s.number}
+                        </div>
+                        <div style={{ flex: 1 }}>
+                          <div style={{ fontWeight: 600, fontSize: 12, color: COLORS.textMuted, marginBottom: 4 }}>{formatDate(s.date)}</div>
+                          <div style={{ fontSize: 13, color: COLORS.text }}>{s.note}</div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Footer actions */}
+              <div style={{ display: "flex", gap: 10, marginTop: 20, paddingTop: 16, borderTop: `1px solid ${COLORS.border}`, flexWrap: "wrap" }}>
+                <select value={detail.status} onChange={e => updateStatus(detail.id, e.target.value)}
+                  style={{ ...inputStyle, flex: 1, minWidth: 140 }}>
+                  {Object.entries(AESTHETIC_STATUS).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+                </select>
+                <button onClick={() => deleteCase(detail.id)}
+                  style={{ background: COLORS.danger + "12", color: COLORS.danger, border: `1px solid ${COLORS.danger}33`, borderRadius: 8, padding: "9px 16px", fontWeight: 600, cursor: "pointer", fontSize: 13 }}>
+                  🗑 Eliminar caso
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function BudgetView({ budgets, setBudgets, patients, treatments, setTreatments }) {
   const getPatient = (id) => patients.find(p => p.id === Number(id));
 
@@ -2529,6 +3098,7 @@ export default function App() {
   const [appointments, setAppointments] = useState([]);
   const [treatments, setTreatments] = useState([]);
   const [budgets, setBudgets] = useState([]);
+  const [aestheticCases, setAestheticCases] = useState([]);
   const [selectedPatient, setSelectedPatient] = useState(null);
   const [loading, setLoading] = useState(true);
   const [session, setSession] = useState(null);
@@ -2564,18 +3134,20 @@ export default function App() {
       supabase.from("appointments").select("*").order("date"),
       supabase.from("treatments").select("*").order("date", { ascending: false }),
       supabase.from("budgets").select("*").order("id", { ascending: false }).then(r => r).catch(() => ({ data: [] })),
-    ]).then(([p, a, t, b]) => {
+      supabase.from("aesthetic_cases").select("*").order("id", { ascending: false }).then(r => r).catch(() => ({ data: [] })),
+    ]).then(([p, a, t, b, ac]) => {
       setPatients(p.data || []);
       setAppointments((a.data || []).map(toAppt));
       setTreatments((t.data || []).map(toTreat));
       setBudgets(((b && b.data) || []).map(toBudget));
+      setAestheticCases(((ac && ac.data) || []).map(toAesthetic));
       setLoading(false);
     });
   };
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
-    setPatients([]); setAppointments([]); setTreatments([]); setBudgets([]);
+    setPatients([]); setAppointments([]); setTreatments([]); setBudgets([]); setAestheticCases([]);
   };
 
   // ── Google Calendar ────────────────────────────────────────────────
@@ -2683,6 +3255,7 @@ export default function App() {
     { id: "patients",     label: "Pacientes",         icon: "👥" },
     { id: "treatments",   label: "Historial Clínico", icon: "🦷" },
     { id: "budgets",      label: "Presupuestos",      icon: "📋" },
+    { id: "aesthetic",    label: "Estética Dental",   icon: "✨" },
     { id: "performance",  label: "Rendimiento",       icon: "📊" },
   ];
 
@@ -2792,6 +3365,7 @@ export default function App() {
           {view === "patients"    && <PatientsView patients={patients} setPatients={setPatients} appointments={appointments} treatments={treatments} setTreatments={setTreatments} selectedPatient={selectedPatient} setSelectedPatient={setSelectedPatient} />}
           {view === "treatments"  && <TreatmentsView treatments={treatments} setTreatments={setTreatments} patients={patients} />}
           {view === "budgets"     && <BudgetView budgets={budgets} setBudgets={setBudgets} patients={patients} treatments={treatments} setTreatments={setTreatments} />}
+          {view === "aesthetic"   && <AestheticView aestheticCases={aestheticCases} setAestheticCases={setAestheticCases} patients={patients} />}
           {view === "performance" && <PerformanceView appointments={appointments} treatments={treatments} patients={patients} />}
         </div>
       </main>
