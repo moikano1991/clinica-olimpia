@@ -741,7 +741,7 @@ function PatientsView({ patients, setPatients, appointments, treatments, setTrea
     if (!p) { setDetail(null); setSelectedPatient(null); return null; }
     const pAppts = appointments.filter(a => a.patientId === p.id).sort((a, b) => b.date.localeCompare(a.date));
     const pTreat = treatments.filter(t => t.patientId === p.id).sort((a, b) => b.date.localeCompare(a.date));
-    const totalDebt = pTreat.reduce((s, t) => s + (t.cost - t.paid), 0);
+    const totalDebt = pTreat.filter(t => t.status === "completado" || t.status === "pendiente pago").reduce((s, t) => s + (t.cost - t.paid), 0);
 
     const fields = [
       { label: "Nombre completo *", key: "name", type: "text" },
@@ -1683,7 +1683,7 @@ function PerformanceView({ appointments, treatments, patients }) {
   // KPIs principales
   const revenue   = mT.reduce((s, t) => s + (t.paid || 0), 0);
   const billed    = mT.reduce((s, t) => s + (t.cost || 0), 0);
-  const debt      = billed - revenue;
+  const debt      = mT.filter(t => t.status === "completado" || t.status === "pendiente pago").reduce((s, t) => s + ((t.cost || 0) - (t.paid || 0)), 0);
   const collRate  = billed > 0 ? Math.round(revenue / billed * 100) : 0;
   const prevRev   = pmT.reduce((s, t) => s + (t.paid || 0), 0);
   const prevBill  = pmT.reduce((s, t) => s + (t.cost || 0), 0);
@@ -1763,7 +1763,7 @@ function PerformanceView({ appointments, treatments, patients }) {
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 12, marginBottom: 12 }}>
         <Card icon="💰" label="Ingresos cobrados" value={formatCLP(revenue)} sub={`vs ${formatCLP(prevRev)} mes ant.`} delta={delta(revenue, prevRev)} bg="#f0fdf4" />
         <Card icon="📋" label="Total facturado"   value={formatCLP(billed)}  sub={`vs ${formatCLP(prevBill)} mes ant.`} delta={delta(billed, prevBill)}   bg="#eff6ff" />
-        <Card icon="💸" label="Por cobrar"        value={formatCLP(debt)}    sub={`${mT.filter(t=>t.cost>t.paid).length} tratamientos`} bg="#fff1f2" color={COLORS.danger} />
+        <Card icon="💸" label="Por cobrar"        value={formatCLP(debt)}    sub={`${mT.filter(t=>(t.status==="completado"||t.status==="pendiente pago")&&t.cost>t.paid).length} tratamientos`} bg="#fff1f2" color={COLORS.danger} />
         <Card icon="📊" label="Tasa de cobro"     value={`${collRate}%`}     sub={`${mT.length} tratamientos`} bg="#fdf4ff" color="#7c3aed" />
       </div>
 
@@ -1906,7 +1906,7 @@ function DashboardView({ appointments, treatments, patients, setView, setAgendaC
   const todayAppts = appointments.filter(a => a.date === today());
   const pending = appointments.filter(a => a.status === "pendiente").length;
   const confirmed = appointments.filter(a => a.status === "confirmada").length;
-  const totalDebt = treatments.reduce((s, t) => s + (t.cost - t.paid), 0);
+  const totalDebt = treatments.filter(t => t.status === "completado" || t.status === "pendiente pago").reduce((s, t) => s + (t.cost - t.paid), 0);
   const thisMonth = new Date().toISOString().slice(0, 7);
   const monthRevenue = treatments.filter(t => t.date.startsWith(thisMonth)).reduce((s, t) => s + t.paid, 0);
 
