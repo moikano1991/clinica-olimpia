@@ -1091,19 +1091,32 @@ function PatientsView({ patients, setPatients, appointments, treatments, setTrea
         {filtered.length === 0 && search && (
           <div style={{ textAlign: "center", color: COLORS.textDim, padding: 40 }}>No se encontró ningún paciente con "{search}"</div>
         )}
-        {filtered.map(p => (
-          <div key={p.id} onClick={() => setDetail(p.id)} style={{ background: COLORS.card, border: `1px solid ${COLORS.border}`, borderRadius: 12, padding: "14px 18px", cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <div>
-              <div style={{ color: COLORS.text, fontWeight: 600, fontSize: 15 }}>{p.name}</div>
-              <div style={{ color: COLORS.textMuted, fontSize: 12, marginTop: 2 }}>{p.rut} · {p.phone}</div>
-              {p.notes && <div style={{ color: COLORS.warning, fontSize: 11, marginTop: 2 }}>⚠️ {p.notes}</div>}
+        {filtered.map(p => {
+          const pDebt = treatments
+            .filter(t => t.patientId === p.id && (t.status === "completado" || t.status === "pendiente pago"))
+            .reduce((s, t) => s + ((t.cost || 0) - (t.paid || 0)), 0);
+          const hasDebt = pDebt > 0;
+          return (
+            <div key={p.id} onClick={() => setDetail(p.id)}
+              style={{ background: hasDebt ? "#fff5f5" : COLORS.card, border: `1px solid ${hasDebt ? COLORS.danger + "55" : COLORS.border}`, borderRadius: 12, padding: "14px 18px", cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div>
+                <div style={{ color: hasDebt ? COLORS.danger : COLORS.text, fontWeight: 700, fontSize: 15, display: "flex", alignItems: "center", gap: 6 }}>
+                  {hasDebt && <span style={{ fontSize: 13 }}>🔴</span>}
+                  {p.name}
+                </div>
+                <div style={{ color: COLORS.textMuted, fontSize: 12, marginTop: 2 }}>{p.rut} · {p.phone}</div>
+                {p.notes && <div style={{ color: COLORS.warning, fontSize: 11, marginTop: 2 }}>⚠️ {p.notes}</div>}
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
+                {hasDebt
+                  ? <span style={{ color: COLORS.danger, fontWeight: 700, fontSize: 13 }}>Debe {formatCLP(pDebt)}</span>
+                  : <span style={{ color: COLORS.textDim, fontSize: 12 }}>{appointments.filter(a => a.patientId === p.id).length} citas</span>
+                }
+                <span style={{ color: COLORS.accent, fontSize: 12 }}>Ver ficha →</span>
+              </div>
             </div>
-            <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
-              <span style={{ color: COLORS.textDim, fontSize: 12 }}>{appointments.filter(a => a.patientId === p.id).length} citas</span>
-              <span style={{ color: COLORS.accent, fontSize: 12 }}>Ver ficha →</span>
-            </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
 
       {showForm && (
