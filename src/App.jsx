@@ -600,15 +600,22 @@ function PatientsView({ patients, setPatients, appointments, treatments, setTrea
   useEffect(() => { if (selectedPatient) setDetail(selectedPatient); }, [selectedPatient]);
 
   const normalizeRut = (r) => (r || "").replace(/[.\-]/g, "").toLowerCase();
-  const filtered = patients.filter(p => {
-    const q = search.toLowerCase();
-    return (
-      p.name.toLowerCase().includes(q) ||
-      normalizeRut(p.rut).includes(normalizeRut(search)) ||
-      (p.phone || "").includes(q) ||
-      (p.email || "").toLowerCase().includes(q)
-    );
-  });
+  const getPatientDebt = (patientId) =>
+    treatments
+      .filter(t => t.patientId === patientId && (t.status === "completado" || t.status === "pendiente pago"))
+      .reduce((s, t) => s + ((t.cost || 0) - (t.paid || 0)), 0);
+
+  const filtered = patients
+    .filter(p => {
+      const q = search.toLowerCase();
+      return (
+        p.name.toLowerCase().includes(q) ||
+        normalizeRut(p.rut).includes(normalizeRut(search)) ||
+        (p.phone || "").includes(q) ||
+        (p.email || "").toLowerCase().includes(q)
+      );
+    })
+    .sort((a, b) => getPatientDebt(b.id) - getPatientDebt(a.id));
 
   const savePatient = async () => {
     if (!form.name) return;
@@ -1092,9 +1099,7 @@ function PatientsView({ patients, setPatients, appointments, treatments, setTrea
           <div style={{ textAlign: "center", color: COLORS.textDim, padding: 40 }}>No se encontró ningún paciente con "{search}"</div>
         )}
         {filtered.map(p => {
-          const pDebt = treatments
-            .filter(t => t.patientId === p.id && (t.status === "completado" || t.status === "pendiente pago"))
-            .reduce((s, t) => s + ((t.cost || 0) - (t.paid || 0)), 0);
+          const pDebt = getPatientDebt(p.id);
           const hasDebt = pDebt > 0;
           return (
             <div key={p.id} onClick={() => setDetail(p.id)}
