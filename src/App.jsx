@@ -563,6 +563,34 @@ function PatientsView({ patients, setPatients, appointments, treatments, setTrea
   const [showTreatForm, setShowTreatForm] = useState(false);
   const [treatForm, setTreatForm] = useState({ date: today(), procedure: "Limpieza dental", tooth: "-", cost: "", paid: "", status: "completado", notes: "" });
 
+  // Editar/eliminar tratamiento desde ficha
+  const [editTreatDet, setEditTreatDet] = useState(null);
+
+  const openEditTreatDet = (t) => setEditTreatDet({
+    id: t.id, date: t.date, procedure: t.procedure,
+    tooth: t.tooth || "-", cost: String(t.cost || ""), paid: String(t.paid || ""),
+    status: t.status || "completado", notes: t.notes || "",
+  });
+
+  const saveEditTreatDet = async () => {
+    if (!editTreatDet) return;
+    const costNum = Number(editTreatDet.cost) || 0;
+    const paidNum = Number(editTreatDet.paid) || 0;
+    const autoStatus = paidNum >= costNum && costNum > 0 ? "completado" : paidNum > 0 ? "pendiente pago" : editTreatDet.status;
+    const { data, error } = await supabase.from("treatments").update({
+      date: editTreatDet.date, procedure: editTreatDet.procedure, tooth: editTreatDet.tooth || "-",
+      cost: costNum, paid: paidNum, status: autoStatus, notes: editTreatDet.notes,
+    }).eq("id", editTreatDet.id).select().single();
+    if (!error) { setTreatments(prev => prev.map(t => t.id === editTreatDet.id ? toTreat(data) : t)); setEditTreatDet(null); }
+    else alert("Error: " + error.message);
+  };
+
+  const deleteTreatDet = async (id) => {
+    if (!window.confirm("¿Eliminar este tratamiento? Esta acción no se puede deshacer.")) return;
+    await supabase.from("treatments").delete().eq("id", id);
+    setTreatments(prev => prev.filter(t => t.id !== id));
+  };
+
   // Voz
   const [isRecording, setIsRecording] = useState(false);
   const [transcript, setTranscript] = useState("");
@@ -865,16 +893,28 @@ function PatientsView({ patients, setPatients, appointments, treatments, setTrea
         {pTreat.length === 0 ? <div style={{ color: COLORS.textDim }}>Sin tratamientos registrados</div> : (
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             {pTreat.map(t => (
-              <div key={t.id} style={{ background: COLORS.card, border: `1px solid ${COLORS.border}`, borderRadius: 10, padding: "12px 16px", display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
-                <div>
-                  <div style={{ color: COLORS.text, fontWeight: 600 }}>{formatDate(t.date)} — {t.procedure}</div>
-                  {t.tooth && t.tooth !== "-" && <div style={{ color: COLORS.textMuted, fontSize: 12 }}>🦷 FDI {t.tooth}</div>}
-                  {t.notes && <div style={{ color: COLORS.textDim, fontSize: 12 }}>{t.notes}</div>}
+              <div key={t.id} style={{ background: COLORS.card, border: `1px solid ${COLORS.border}`, borderRadius: 10, padding: "12px 16px" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 8, marginBottom: 8 }}>
+                  <div>
+                    <div style={{ color: COLORS.text, fontWeight: 600 }}>{formatDate(t.date)} — {t.procedure}</div>
+                    {t.tooth && t.tooth !== "-" && <div style={{ color: COLORS.textMuted, fontSize: 12 }}>🦷 FDI {t.tooth}</div>}
+                    {t.notes && <div style={{ color: COLORS.textDim, fontSize: 12 }}>{t.notes}</div>}
+                  </div>
+                  <div style={{ textAlign: "right" }}>
+                    <div style={{ color: COLORS.text, fontWeight: 700 }}>{formatCLP(t.cost)}</div>
+                    <div style={{ color: t.cost === t.paid ? COLORS.success : COLORS.danger, fontSize: 12 }}>Pagado: {formatCLP(t.paid)}</div>
+                    <StatusBadge status={t.status} />
+                  </div>
                 </div>
-                <div style={{ textAlign: "right" }}>
-                  <div style={{ color: COLORS.text, fontWeight: 700 }}>{formatCLP(t.cost)}</div>
-                  <div style={{ color: t.cost === t.paid ? COLORS.success : COLORS.danger, fontSize: 12 }}>Pagado: {formatCLP(t.paid)}</div>
-                  <StatusBadge status={t.status} />
+                <div style={{ display: "flex", gap: 6 }}>
+                  <button onClick={() => openEditTreatDet(t)}
+                    style={{ background: COLORS.warning + "15", color: COLORS.warning, border: `1px solid ${COLORS.warning}44`, borderRadius: 6, padding: "4px 10px", fontSize: 11, cursor: "pointer", fontWeight: 700 }}>
+                    ✏️ Editar
+                  </button>
+                  <button onClick={() => deleteTreatDet(t.id)}
+                    style={{ background: COLORS.danger + "10", color: COLORS.danger, border: `1px solid ${COLORS.danger}33`, borderRadius: 6, padding: "4px 10px", fontSize: 11, cursor: "pointer", fontWeight: 700 }}>
+                    🗑 Eliminar
+                  </button>
                 </div>
               </div>
             ))}
@@ -945,6 +985,68 @@ function PatientsView({ patients, setPatients, appointments, treatments, setTrea
                   ✓ Guardar tratamiento
                 </button>
                 <button onClick={() => setShowTreatForm(false)} style={{ flex: 1, background: COLORS.card, color: COLORS.textMuted, border: `1px solid ${COLORS.border}`, borderRadius: 8, padding: "11px", cursor: "pointer" }}>
+                  Cancelar
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Modal editar tratamiento desde ficha */}
+        {editTreatDet && (
+          <div style={{ position: "fixed", inset: 0, background: "#00000088", zIndex: 300, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+            <div style={{ background: COLORS.surface, border: `1px solid ${COLORS.border}`, borderRadius: 16, padding: 28, width: "100%", maxWidth: 480, maxHeight: "90vh", overflowY: "auto" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18 }}>
+                <h3 style={{ color: COLORS.text, margin: 0 }}>✏️ Editar Tratamiento</h3>
+                <button onClick={() => setEditTreatDet(null)} style={{ background: "none", border: "none", color: COLORS.textMuted, cursor: "pointer", fontSize: 22 }}>×</button>
+              </div>
+              <div style={{ background: COLORS.accent + "15", borderRadius: 8, padding: "10px 14px", marginBottom: 16, fontSize: 13, color: COLORS.accent, fontWeight: 600 }}>
+                👤 {p.name}
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+                <div>
+                  <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>Fecha</label>
+                  <input type="date" value={editTreatDet.date} onChange={e => setEditTreatDet(f => ({ ...f, date: e.target.value }))} style={inputStyle} />
+                </div>
+                <div>
+                  <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>Procedimiento</label>
+                  <select value={editTreatDet.procedure} onChange={e => setEditTreatDet(f => ({ ...f, procedure: e.target.value }))} style={inputStyle}>
+                    {treatmentCatalog.map(t => <option key={t} value={t}>{t}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 6 }}>Pieza(s) dental(es) — FDI</label>
+                  <ToothSelector value={editTreatDet.tooth} onChange={v => setEditTreatDet(f => ({ ...f, tooth: v }))} />
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                  <div>
+                    <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>Costo total ($)</label>
+                    <input type="number" value={editTreatDet.cost} onChange={e => setEditTreatDet(f => ({ ...f, cost: e.target.value }))} placeholder="0" style={inputStyle} />
+                  </div>
+                  <div>
+                    <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>Pagado ($)</label>
+                    <input type="number" value={editTreatDet.paid} onChange={e => setEditTreatDet(f => ({ ...f, paid: e.target.value }))} placeholder="0" style={inputStyle} />
+                  </div>
+                </div>
+                <div>
+                  <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>Estado</label>
+                  <select value={editTreatDet.status} onChange={e => setEditTreatDet(f => ({ ...f, status: e.target.value }))} style={inputStyle}>
+                    <option value="completado">Completado</option>
+                    <option value="pendiente pago">Pendiente de pago</option>
+                    <option value="en proceso">En proceso</option>
+                    <option value="planificado">Planificado</option>
+                  </select>
+                </div>
+                <div>
+                  <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>Notas</label>
+                  <input type="text" value={editTreatDet.notes} onChange={e => setEditTreatDet(f => ({ ...f, notes: e.target.value }))} placeholder="Observaciones…" style={inputStyle} />
+                </div>
+              </div>
+              <div style={{ display: "flex", gap: 10, marginTop: 22 }}>
+                <button onClick={saveEditTreatDet} style={{ flex: 1, background: COLORS.accent, color: "#fff", border: "none", borderRadius: 8, padding: "11px", fontWeight: 700, cursor: "pointer", fontSize: 15 }}>
+                  ✓ Guardar cambios
+                </button>
+                <button onClick={() => setEditTreatDet(null)} style={{ flex: 1, background: COLORS.card, color: COLORS.textMuted, border: `1px solid ${COLORS.border}`, borderRadius: 8, padding: "11px", cursor: "pointer" }}>
                   Cancelar
                 </button>
               </div>
@@ -1163,7 +1265,35 @@ function TreatmentsView({ treatments, setTreatments, patients }) {
   const [form, setForm] = useState({ patientId: "", date: today(), procedure: "Limpieza dental", tooth: "-", cost: "", paid: "", status: "completado", notes: "" });
 
   // Editar pago
-  const [editPayment, setEditPayment] = useState(null); // { id, cost, paid, status, patientName, procedure }
+  const [editPayment, setEditPayment] = useState(null);
+
+  // Editar tratamiento completo
+  const [editTreat, setEditTreat] = useState(null);
+
+  const openEditTreat = (t) => {
+    setEditTreat({ id: t.id, patientId: t.patientId, date: t.date, procedure: t.procedure,
+      tooth: t.tooth || "-", cost: String(t.cost || ""), paid: String(t.paid || ""),
+      status: t.status || "completado", notes: t.notes || "" });
+  };
+
+  const saveEditTreat = async () => {
+    if (!editTreat) return;
+    const costNum = Number(editTreat.cost) || 0;
+    const paidNum = Number(editTreat.paid) || 0;
+    const autoStatus = paidNum >= costNum && costNum > 0 ? "completado" : paidNum > 0 ? "pendiente pago" : editTreat.status;
+    const { data, error } = await supabase.from("treatments").update({
+      date: editTreat.date, procedure: editTreat.procedure, tooth: editTreat.tooth || "-",
+      cost: costNum, paid: paidNum, status: autoStatus, notes: editTreat.notes,
+    }).eq("id", editTreat.id).select().single();
+    if (!error) { setTreatments(prev => prev.map(t => t.id === editTreat.id ? toTreat(data) : t)); setEditTreat(null); }
+    else alert("Error: " + error.message);
+  };
+
+  const deleteTreat = async (id) => {
+    if (!window.confirm("¿Eliminar este tratamiento del historial clínico? Esta acción no se puede deshacer.")) return;
+    await supabase.from("treatments").delete().eq("id", id);
+    setTreatments(prev => prev.filter(t => t.id !== id));
+  };
 
   // Voz para tratamientos
   const [isRecordingT, setIsRecordingT] = useState(false);
@@ -1280,8 +1410,16 @@ function TreatmentsView({ treatments, setTreatments, patients }) {
                   <StatusBadge status={t.status} />
                 </div>
               </div>
-              {/* Botones de pago */}
+              {/* Botones de acción */}
               <div style={{ marginTop: 10, display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                <button onClick={() => openEditTreat(t)}
+                  style={{ background: COLORS.warning + "15", color: COLORS.warning, border: `1px solid ${COLORS.warning}44`, borderRadius: 6, padding: "5px 12px", fontSize: 12, cursor: "pointer", fontWeight: 700 }}>
+                  ✏️ Editar
+                </button>
+                <button onClick={() => deleteTreat(t.id)}
+                  style={{ background: COLORS.danger + "10", color: COLORS.danger, border: `1px solid ${COLORS.danger}33`, borderRadius: 6, padding: "5px 12px", fontSize: 12, cursor: "pointer", fontWeight: 700 }}>
+                  🗑 Eliminar
+                </button>
                 <button
                   onClick={() => setEditPayment({ id: t.id, cost: t.cost, paid: t.paid, status: t.status, patientName: p?.name, procedure: t.procedure })}
                   style={{ background: COLORS.accent + "18", color: COLORS.accent, border: `1px solid ${COLORS.accent}44`, borderRadius: 6, padding: "5px 12px", fontSize: 12, cursor: "pointer", fontWeight: 700 }}>
@@ -1310,6 +1448,69 @@ function TreatmentsView({ treatments, setTreatments, patients }) {
           );
         })}
       </div>
+
+      {/* Modal editar tratamiento completo */}
+      {editTreat && (
+        <div style={{ position: "fixed", inset: 0, background: "#00000088", zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+          <div style={{ background: COLORS.surface, border: `1px solid ${COLORS.border}`, borderRadius: 16, padding: 28, width: "100%", maxWidth: 480, maxHeight: "90vh", overflowY: "auto" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18 }}>
+              <h3 style={{ color: COLORS.text, margin: 0 }}>✏️ Editar Tratamiento</h3>
+              <button onClick={() => setEditTreat(null)} style={{ background: "none", border: "none", color: COLORS.textMuted, cursor: "pointer", fontSize: 22 }}>×</button>
+            </div>
+            {/* Paciente (solo lectura) */}
+            <div style={{ background: COLORS.bg, borderRadius: 8, padding: "10px 14px", marginBottom: 16, fontSize: 13, color: COLORS.textMuted }}>
+              👤 {getPatient(editTreat.patientId)?.name || "Paciente"}
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+              <div>
+                <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>Fecha</label>
+                <input type="date" value={editTreat.date} onChange={e => setEditTreat(f => ({ ...f, date: e.target.value }))} style={inputStyle} />
+              </div>
+              <div>
+                <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>Procedimiento</label>
+                <select value={editTreat.procedure} onChange={e => setEditTreat(f => ({ ...f, procedure: e.target.value }))} style={inputStyle}>
+                  {treatmentCatalog.map(t => <option key={t} value={t}>{t}</option>)}
+                </select>
+              </div>
+              <div>
+                <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 6 }}>Pieza(s) dental(es) — FDI</label>
+                <ToothSelector value={editTreat.tooth} onChange={v => setEditTreat(f => ({ ...f, tooth: v }))} />
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                <div>
+                  <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>Costo total ($)</label>
+                  <input type="number" value={editTreat.cost} onChange={e => setEditTreat(f => ({ ...f, cost: e.target.value }))} placeholder="0" style={inputStyle} />
+                </div>
+                <div>
+                  <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>Pagado ($)</label>
+                  <input type="number" value={editTreat.paid} onChange={e => setEditTreat(f => ({ ...f, paid: e.target.value }))} placeholder="0" style={inputStyle} />
+                </div>
+              </div>
+              <div>
+                <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>Estado</label>
+                <select value={editTreat.status} onChange={e => setEditTreat(f => ({ ...f, status: e.target.value }))} style={inputStyle}>
+                  <option value="completado">Completado</option>
+                  <option value="pendiente pago">Pendiente de pago</option>
+                  <option value="en proceso">En proceso</option>
+                  <option value="planificado">Planificado</option>
+                </select>
+              </div>
+              <div>
+                <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>Notas</label>
+                <input type="text" value={editTreat.notes} onChange={e => setEditTreat(f => ({ ...f, notes: e.target.value }))} placeholder="Observaciones…" style={inputStyle} />
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: 10, marginTop: 22 }}>
+              <button onClick={saveEditTreat} style={{ flex: 1, background: COLORS.accent, color: "#fff", border: "none", borderRadius: 8, padding: "11px", fontWeight: 700, cursor: "pointer", fontSize: 15 }}>
+                ✓ Guardar cambios
+              </button>
+              <button onClick={() => setEditTreat(null)} style={{ flex: 1, background: COLORS.card, color: COLORS.textMuted, border: `1px solid ${COLORS.border}`, borderRadius: 8, padding: "11px", cursor: "pointer" }}>
+                Cancelar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Modal editar pago */}
       {editPayment && (
