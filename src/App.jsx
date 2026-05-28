@@ -1667,7 +1667,7 @@ function TreatmentsView({ treatments, setTreatments, patients }) {
 }
 
 // ── Dashboard de rendimiento mensual ────────────────────────────────
-function PerformanceView({ appointments, treatments, patients, orthodonticsCases, implantologyCases }) {
+function PerformanceView({ appointments, treatments, patients, orthodonticsCases, implantologyCases, endodonticsCases }) {
   const [month, setMonth] = useState(() => today().slice(0, 7));
 
   const prevMonthStr = (m) => {
@@ -1705,11 +1705,12 @@ function PerformanceView({ appointments, treatments, patients, orthodonticsCases
   // Pago a colegas del mes
   const mOrtho = (orthodonticsCases || []).filter(c => (c.start_date || "").startsWith(month));
   const mImpl  = (implantologyCases || []).filter(c => (c.date || "").startsWith(month));
-  const { endoPago: endoPagoM, orthoPago: orthoPagoM, implPago: implPagoM, total: totalColegasM } = calcColegasPagos(mT, mOrtho, mImpl);
+  const mEndo  = (endodonticsCases  || []).filter(c => (c.date || "").startsWith(month));
+  const { endoPago: endoPagoM, orthoPago: orthoPagoM, implPago: implPagoM, total: totalColegasM } = calcColegasPagos(mT, mOrtho, mImpl, mEndo);
   const netClinicaM = revenue - totalColegasM;
 
   // Pago a colegas acumulado total (todos los tiempos)
-  const { endoPago: endoPagoTotal, orthoPago: orthoPagoTotal, implPago: implPagoTotal, total: totalColegasTotal } = calcColegasPagos(treatments, orthodonticsCases || [], implantologyCases || []);
+  const { endoPago: endoPagoTotal, orthoPago: orthoPagoTotal, implPago: implPagoTotal, total: totalColegasTotal } = calcColegasPagos(treatments, orthodonticsCases || [], implantologyCases || [], endodonticsCases || []);
 
   // Desglose por profesional (ortodoncia + implantología)
   const profMap = {};
@@ -1987,6 +1988,384 @@ function PerformanceView({ appointments, treatments, patients, orthodonticsCases
           })}
         </div>
       </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════
+// ENDODONCIA
+// ═══════════════════════════════════════════════════════
+function EndodonciaView({ cases, setCases, patients }) {
+  const toEndo = (r) => ({ ...r, patientId: r.patient_id, sessions: r.sessions || [] });
+  const getPatient = (id) => patients.find(p => p.id === Number(id));
+
+  const ENDO_TYPES = ["Unirradicular", "Birradicular", "Multirradicular", "Retratamiento unirradicular", "Retratamiento birradicular", "Retratamiento multirradicular"];
+
+  const defaultForm = { patientId: "", professional: "", professional_pct: 60, date: today(), tooth: "", endo_type: "Unirradicular", total_cost: "", lab_cost: "", paid: "", status: "en proceso", notes: "" };
+  const [showForm, setShowForm]   = useState(false);
+  const [form, setForm]           = useState(defaultForm);
+  const [patSearch, setPatSearch] = useState("");
+  const [patSugg, setPatSugg]     = useState([]);
+  const [detail, setDetail]       = useState(null);
+  const [addSession, setAddSession] = useState(false);
+  const [sessionForm, setSessionForm] = useState({ date: today(), notes: "" });
+  const [payInput, setPayInput]   = useState("");
+
+  const handlePatSearch = (val) => {
+    setPatSearch(val); setForm(f => ({ ...f, patientId: "" }));
+    if (!val.trim()) { setPatSugg([]); return; }
+    const q = val.toLowerCase().replace(/\./g, "").replace(/-/g, "");
+    setPatSugg(patients.filter(p => p.name?.toLowerCase().includes(q) || p.rut?.replace(/\./g,"").replace(/-/g,"").toLowerCase().includes(q)).slice(0, 6));
+  };
+
+  const saveForm = async () => {
+    if (!form.patientId || !form.professional) return;
+    const payload = {
+      patient_id: Number(form.patientId), professional: form.professional,
+      professional_pct: Number(form.professional_pct) || 60,
+      date: form.date, tooth: form.tooth, endo_type: form.endo_type,
+      total_cost: Number(form.total_cost) || 0, lab_cost: Number(form.lab_cost) || 0,
+      paid: Number(form.paid) || 0, status: form.status, notes: form.notes, sessions: [],
+    };
+    const { data, error } = await supabase.from("endodontics").insert([payload]).select().single();
+    if (!error) { setCases(prev => [toEndo(data), ...prev]); setShowForm(false); setForm(defaultForm); setPatSearch(""); }
+    else alert("Error: " + error.message);
+  };
+
+  const addSessionToCase = async (caseId) => {
+    const c = cases.find(x => x.id === caseId);
+    if (!c) return;
+    const newSessions = [...(c.sessions || []), { date: sessionForm.date, notes: sessionForm.notes }];
+    const { error } = await supabase.from("endodontics").update({ sessions: newSessions }).eq("id", caseId);
+    if (!error) { setCases(prev => prev.map(x => x.id === caseId ? { ...x, sessions: newSessions } : x)); setAddSession(false); setSessionForm({ date: today(), notes: "" }); }
+  };
+
+  const deleteCase = async (id) => {
+    if (!window.confirm("¿Eliminar este caso?")) return;
+    await supabase.from("endodontics").delete().eq("id", id);
+    setCases(prev => prev.filter(x => x.id !== id)); setDetail(null);
+  };
+
+  const updateStatus = async (id, status) => {
+    await supabase.from("endodontics").update({ status }).eq("id", id);
+    setCases(prev => prev.map(x => x.id === id ? { ...x, status } : x));
+  };
+
+  const registerPay = async (c) => {
+    const amount = Number(payInput) || 0; if (!amount) return;
+    const newPaid = Math.min((c.paid || 0) + amount, c.total_cost);
+    await supabase.from("endodontics").update({ paid: newPaid }).eq("id", c.id);
+    setCases(prev => prev.map(x => x.id === c.id ? { ...x, paid: newPaid } : x)); setPayInput("");
+  };
+
+  const calcEarnings = (c) => {
+    const base = (c.total_cost || 0) - (c.lab_cost || 0);
+    const profEarnings  = Math.round(base * (c.professional_pct || 0) / 100);
+    const clinicEarnings = base - profEarnings;
+    const debt = (c.total_cost || 0) - (c.paid || 0);
+    return { base, profEarnings, clinicEarnings, debt };
+  };
+
+  const statusColor = { "en proceso": COLORS.accent, completado: COLORS.success, planificado: COLORS.warning };
+  const statusBg    = { "en proceso": "#eff6ff", completado: "#f0fdf4", planificado: "#fffbeb" };
+  const inputStyle  = { width: "100%", padding: "8px 12px", border: `1px solid ${COLORS.border}`, borderRadius: 8, fontSize: 13, color: COLORS.text, background: COLORS.bg, boxSizing: "border-box" };
+
+  const detailCase   = cases.find(c => c.id === detail);
+  const enProceso    = cases.filter(c => c.status === "en proceso").length;
+  const totalCobrado = cases.reduce((s, c) => s + (c.paid || 0), 0);
+  const totalDeuda   = cases.filter(c => c.status === "en proceso" || c.status === "completado").reduce((s, c) => s + Math.max(0, (c.total_cost || 0) - (c.paid || 0)), 0);
+  const totalProfPay = cases.reduce((s, c) => s + calcEarnings(c).profEarnings, 0);
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <div>
+          <h2 style={{ margin: 0, color: COLORS.text, fontSize: 20 }}>🦷 Endodoncia</h2>
+          <p style={{ margin: "4px 0 0", color: COLORS.textMuted, fontSize: 13 }}>{cases.length} caso{cases.length !== 1 ? "s" : ""} registrado{cases.length !== 1 ? "s" : ""}</p>
+        </div>
+        <button onClick={() => setShowForm(true)} style={{ background: COLORS.accent, color: "#fff", border: "none", borderRadius: 10, padding: "10px 18px", fontWeight: 700, cursor: "pointer", fontSize: 13 }}>+ Nuevo caso</button>
+      </div>
+
+      {cases.length > 0 && (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 10 }}>
+          {[
+            { label: "En proceso", value: enProceso,            icon: "⚡", color: COLORS.accent,  bg: "#eff6ff" },
+            { label: "Cobrado",    value: formatCLP(totalCobrado), icon: "💰", color: COLORS.success, bg: "#f0fdf4" },
+            { label: "Por cobrar", value: formatCLP(totalDeuda),   icon: "💸", color: COLORS.danger,  bg: "#fff1f2" },
+            { label: "Pago colega (60%)", value: formatCLP(totalProfPay), icon: "👨‍⚕️", color: "#7c3aed", bg: "#f5f3ff" },
+          ].map(card => (
+            <div key={card.label} style={{ background: card.bg, borderRadius: 12, padding: "14px 16px" }}>
+              <div style={{ fontSize: 11, color: COLORS.textMuted, marginBottom: 4 }}>{card.icon} {card.label}</div>
+              <div style={{ fontWeight: 800, fontSize: 17, color: card.color }}>{card.value}</div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Lista */}
+      {cases.length === 0
+        ? <div style={{ textAlign: "center", color: COLORS.textDim, padding: 60, background: COLORS.card, borderRadius: 14, border: `1px solid ${COLORS.border}` }}>
+            <div style={{ fontSize: 40, marginBottom: 8 }}>🦷</div>
+            <div>No hay casos de endodoncia registrados</div>
+          </div>
+        : <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            {cases.map(c => {
+              const p = getPatient(c.patientId);
+              const { debt } = calcEarnings(c);
+              const showDebt = debt > 0 && (c.status === "en proceso" || c.status === "completado");
+              return (
+                <div key={c.id} onClick={() => setDetail(c.id)}
+                  style={{ background: COLORS.card, border: `1px solid ${COLORS.border}`, borderRadius: 12, padding: "14px 18px", cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontWeight: 700, fontSize: 15, color: COLORS.text }}>{p?.name || "—"}</div>
+                    <div style={{ fontSize: 12, color: COLORS.textMuted, marginTop: 2 }}>
+                      👨‍⚕️ {c.professional} · {c.professional_pct}% · {c.endo_type}{c.tooth ? ` · Pieza ${c.tooth}` : ""}
+                    </div>
+                    <div style={{ fontSize: 11, color: COLORS.textDim, marginTop: 2 }}>{formatDate(c.date)} · {(c.sessions || []).length} sesión{(c.sessions || []).length !== 1 ? "es" : ""}</div>
+                  </div>
+                  <div style={{ textAlign: "right", flexShrink: 0 }}>
+                    <div style={{ fontWeight: 700, fontSize: 14, color: COLORS.text }}>{formatCLP(c.total_cost)}</div>
+                    {showDebt && <div style={{ fontSize: 12, color: COLORS.danger }}>Debe {formatCLP(debt)}</div>}
+                    <span style={{ background: statusBg[c.status] || COLORS.bg, color: statusColor[c.status] || COLORS.textMuted, borderRadius: 20, padding: "2px 10px", fontSize: 11, fontWeight: 700 }}>{c.status}</span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+      }
+
+      {/* MODAL DETALLE */}
+      {detailCase && (() => {
+        const p = getPatient(detailCase.patientId);
+        const { base, profEarnings, clinicEarnings, debt } = calcEarnings(detailCase);
+        return (
+          <div style={{ position: "fixed", inset: 0, background: "#00000088", zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+            <div style={{ background: COLORS.surface, borderRadius: 18, padding: 28, width: "100%", maxWidth: 560, maxHeight: "90vh", overflowY: "auto", display: "flex", flexDirection: "column", gap: 18 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <h3 style={{ margin: 0, color: COLORS.text }}>🦷 Caso Endodoncia</h3>
+                <button onClick={() => { setDetail(null); setPayInput(""); }} style={{ background: "none", border: "none", fontSize: 24, cursor: "pointer", color: COLORS.textMuted }}>×</button>
+              </div>
+
+              <div style={{ background: COLORS.accent + "15", borderRadius: 10, padding: "12px 16px" }}>
+                <div style={{ fontWeight: 700, color: COLORS.text, fontSize: 15 }}>{p?.name}</div>
+                <div style={{ color: COLORS.textMuted, fontSize: 13 }}>👨‍⚕️ {detailCase.professional} · {detailCase.professional_pct}% comisión</div>
+                <div style={{ color: COLORS.textDim, fontSize: 12, marginTop: 2 }}>
+                  {detailCase.endo_type}{detailCase.tooth ? ` · Pieza ${detailCase.tooth}` : ""} · {formatDate(detailCase.date)}
+                </div>
+                <div style={{ marginTop: 6 }}>
+                  <select value={detailCase.status} onChange={e => updateStatus(detailCase.id, e.target.value)}
+                    style={{ fontSize: 12, fontWeight: 700, padding: "3px 10px", borderRadius: 20, border: "none", background: statusBg[detailCase.status] || COLORS.bg, color: statusColor[detailCase.status] || COLORS.textMuted, cursor: "pointer" }}>
+                    <option value="planificado">Planificado</option>
+                    <option value="en proceso">En proceso</option>
+                    <option value="completado">Completado</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Desglose financiero */}
+              <div style={{ background: COLORS.bg, borderRadius: 12, padding: "16px 18px" }}>
+                <div style={{ fontWeight: 700, color: COLORS.text, marginBottom: 10, fontSize: 13 }}>💵 Desglose financiero</div>
+                {[
+                  { label: "Total tratamiento",               value: formatCLP(detailCase.total_cost), bold: true },
+                  { label: "Laboratorio (excluido %)",        value: `– ${formatCLP(detailCase.lab_cost)}`, color: COLORS.textMuted },
+                  { label: "Base para comisión",              value: formatCLP(base),          color: COLORS.accent },
+                  { label: `Colega (${detailCase.professional_pct}%)`,   value: formatCLP(profEarnings),  color: "#7c3aed" },
+                  { label: `Clínica (${100 - detailCase.professional_pct}%)`, value: formatCLP(clinicEarnings), color: COLORS.success },
+                ].map(row => (
+                  <div key={row.label} style={{ display: "flex", justifyContent: "space-between", fontSize: 13, paddingBottom: 7, marginBottom: 7, borderBottom: `1px solid ${COLORS.border}` }}>
+                    <span style={{ color: COLORS.textMuted }}>{row.label}</span>
+                    <span style={{ fontWeight: row.bold ? 700 : 600, color: row.color || COLORS.text }}>{row.value}</span>
+                  </div>
+                ))}
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 14, marginTop: 4 }}>
+                  <span style={{ color: COLORS.textMuted }}>Pagado</span>
+                  <span style={{ fontWeight: 700, color: COLORS.success }}>{formatCLP(detailCase.paid)}</span>
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 14, marginTop: 4 }}>
+                  <span style={{ color: COLORS.textMuted }}>Por cobrar</span>
+                  <span style={{ fontWeight: 700, color: debt > 0 ? COLORS.danger : COLORS.success }}>{formatCLP(debt)}</span>
+                </div>
+                <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+                  <input type="number" placeholder="Monto a registrar" value={payInput} onChange={e => setPayInput(e.target.value)}
+                    style={{ flex: 1, padding: "7px 10px", border: `1px solid ${COLORS.border}`, borderRadius: 8, fontSize: 13 }} />
+                  <button onClick={() => registerPay(detailCase)}
+                    style={{ background: COLORS.success, color: "#fff", border: "none", borderRadius: 8, padding: "7px 14px", fontWeight: 700, cursor: "pointer", fontSize: 13 }}>
+                    + Pago
+                  </button>
+                </div>
+              </div>
+
+              {/* Sesiones */}
+              <div>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+                  <div style={{ fontWeight: 700, color: COLORS.text, fontSize: 13 }}>📋 Sesiones ({(detailCase.sessions || []).length})</div>
+                  <button onClick={() => setAddSession(true)}
+                    style={{ background: COLORS.accent + "18", color: COLORS.accent, border: `1px solid ${COLORS.accent}44`, borderRadius: 8, padding: "5px 12px", fontSize: 12, cursor: "pointer", fontWeight: 700 }}>
+                    + Agregar sesión
+                  </button>
+                </div>
+                {(detailCase.sessions || []).length === 0
+                  ? <div style={{ color: COLORS.textDim, fontSize: 13, fontStyle: "italic" }}>Sin sesiones registradas</div>
+                  : <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                      {[...(detailCase.sessions || [])].reverse().map((s, i) => (
+                        <div key={i} style={{ background: COLORS.bg, borderRadius: 8, padding: "8px 12px" }}>
+                          <div style={{ fontWeight: 600, color: COLORS.accent, fontSize: 12 }}>{formatDate(s.date)}</div>
+                          <div style={{ color: COLORS.text, fontSize: 13, marginTop: 2 }}>{s.notes || "—"}</div>
+                        </div>
+                      ))}
+                    </div>
+                }
+              </div>
+
+              {detailCase.notes && (
+                <div style={{ background: COLORS.bg, borderRadius: 8, padding: "10px 14px", fontSize: 13, color: COLORS.textMuted }}>📝 {detailCase.notes}</div>
+              )}
+
+              <button onClick={() => deleteCase(detailCase.id)}
+                style={{ background: COLORS.danger + "18", color: COLORS.danger, border: `1px solid ${COLORS.danger}44`, borderRadius: 8, padding: "9px", fontWeight: 700, cursor: "pointer", fontSize: 13 }}>
+                🗑 Eliminar caso
+              </button>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* MODAL AGREGAR SESIÓN */}
+      {addSession && detail && (
+        <div style={{ position: "fixed", inset: 0, background: "#00000088", zIndex: 300, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+          <div style={{ background: COLORS.surface, borderRadius: 16, padding: 24, width: "100%", maxWidth: 400 }}>
+            <h4 style={{ margin: "0 0 16px", color: COLORS.text }}>📋 Agregar sesión</h4>
+            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              <div>
+                <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>Fecha</label>
+                <input type="date" value={sessionForm.date} onChange={e => setSessionForm(f => ({ ...f, date: e.target.value }))} style={inputStyle} />
+              </div>
+              <div>
+                <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>Observaciones</label>
+                <textarea value={sessionForm.notes} onChange={e => setSessionForm(f => ({ ...f, notes: e.target.value }))} rows={3}
+                  placeholder="Procedimiento realizado, evolución..." style={{ ...inputStyle, resize: "vertical" }} />
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
+              <button onClick={() => setAddSession(false)} style={{ flex: 1, background: COLORS.bg, border: `1px solid ${COLORS.border}`, borderRadius: 8, padding: "9px", cursor: "pointer", color: COLORS.textMuted }}>Cancelar</button>
+              <button onClick={() => addSessionToCase(detail)} style={{ flex: 1, background: COLORS.accent, color: "#fff", border: "none", borderRadius: 8, padding: "9px", cursor: "pointer", fontWeight: 700 }}>Guardar</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL NUEVO CASO */}
+      {showForm && (
+        <div style={{ position: "fixed", inset: 0, background: "#00000088", zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+          <div style={{ background: COLORS.surface, borderRadius: 18, padding: 28, width: "100%", maxWidth: 520, maxHeight: "90vh", overflowY: "auto" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+              <h3 style={{ margin: 0, color: COLORS.text }}>🦷 Nuevo caso endodoncia</h3>
+              <button onClick={() => setShowForm(false)} style={{ background: "none", border: "none", fontSize: 22, cursor: "pointer", color: COLORS.textMuted }}>×</button>
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+              {/* Paciente */}
+              <div style={{ position: "relative" }}>
+                <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>Paciente *</label>
+                <input value={patSearch} onChange={e => handlePatSearch(e.target.value)} placeholder="Buscar paciente..." style={inputStyle} />
+                {patSugg.length > 0 && (
+                  <div style={{ position: "absolute", top: "100%", left: 0, right: 0, background: COLORS.card, border: `1px solid ${COLORS.border}`, borderRadius: 10, zIndex: 300, boxShadow: "0 8px 24px rgba(0,0,0,0.12)", marginTop: 4 }}>
+                    {patSugg.map(p => (
+                      <div key={p.id} onClick={() => { setPatSearch(p.name); setForm(f => ({ ...f, patientId: String(p.id) })); setPatSugg([]); }}
+                        style={{ padding: "10px 14px", cursor: "pointer", display: "flex", justifyContent: "space-between", borderBottom: `1px solid ${COLORS.border}` }}
+                        onMouseEnter={e => e.currentTarget.style.background = COLORS.bg}
+                        onMouseLeave={e => e.currentTarget.style.background = ""}>
+                        <span style={{ fontWeight: 600 }}>{p.name}</span>
+                        {p.rut && <span style={{ color: COLORS.textMuted, fontSize: 12 }}>{p.rut}</span>}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+              {/* Profesional */}
+              <div>
+                <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>Profesional *</label>
+                <input value={form.professional} onChange={e => setForm(f => ({ ...f, professional: e.target.value }))} placeholder="Nombre del endodoncista" style={inputStyle} />
+              </div>
+              {/* % Comisión */}
+              <div>
+                <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>% Comisión colega</label>
+                <input type="number" value={form.professional_pct} min={0} max={100} onChange={e => setForm(f => ({ ...f, professional_pct: e.target.value }))} style={inputStyle} />
+              </div>
+              {/* Tipo y pieza */}
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                <div>
+                  <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>Tipo de endodoncia</label>
+                  <select value={form.endo_type} onChange={e => setForm(f => ({ ...f, endo_type: e.target.value }))} style={inputStyle}>
+                    {ENDO_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>Pieza dental</label>
+                  <input value={form.tooth} onChange={e => setForm(f => ({ ...f, tooth: e.target.value }))} placeholder="Ej: 36" style={inputStyle} />
+                </div>
+              </div>
+              {/* Fecha */}
+              <div>
+                <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>Fecha</label>
+                <input type="date" value={form.date} onChange={e => setForm(f => ({ ...f, date: e.target.value }))} style={inputStyle} />
+              </div>
+              {/* Costos */}
+              <div>
+                <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>Costo total ($)</label>
+                <input type="number" value={form.total_cost} onChange={e => setForm(f => ({ ...f, total_cost: e.target.value }))} placeholder="0" style={inputStyle} />
+              </div>
+              <div>
+                <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>Laboratorio ($) — excluido de comisión</label>
+                <input type="number" value={form.lab_cost} onChange={e => setForm(f => ({ ...f, lab_cost: e.target.value }))} placeholder="0" style={inputStyle} />
+              </div>
+              <div>
+                <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>Monto pagado ($)</label>
+                <input type="number" value={form.paid} onChange={e => setForm(f => ({ ...f, paid: e.target.value }))} placeholder="0" style={inputStyle} />
+              </div>
+              {/* Vista previa distribución */}
+              {Number(form.total_cost) > 0 && (() => {
+                const base  = Number(form.total_cost) - Number(form.lab_cost || 0);
+                const profE = Math.round(base * Number(form.professional_pct || 0) / 100);
+                return (
+                  <div style={{ background: "#f0fdf4", border: "1px solid #86efac", borderRadius: 10, padding: "12px 14px" }}>
+                    <div style={{ fontWeight: 700, color: COLORS.success, marginBottom: 8, fontSize: 12 }}>Vista previa distribución</div>
+                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, marginBottom: 4 }}>
+                      <span style={{ color: COLORS.textMuted }}>Base neta (sin laboratorio)</span><span style={{ fontWeight: 700 }}>{formatCLP(base)}</span>
+                    </div>
+                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, marginBottom: 4 }}>
+                      <span style={{ color: "#7c3aed" }}>Colega ({form.professional_pct}%)</span><span style={{ fontWeight: 700, color: "#7c3aed" }}>{formatCLP(profE)}</span>
+                    </div>
+                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12 }}>
+                      <span style={{ color: COLORS.success }}>Clínica ({100 - Number(form.professional_pct)}%)</span><span style={{ fontWeight: 700, color: COLORS.success }}>{formatCLP(base - profE)}</span>
+                    </div>
+                  </div>
+                );
+              })()}
+              {/* Estado */}
+              <div>
+                <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>Estado</label>
+                <select value={form.status} onChange={e => setForm(f => ({ ...f, status: e.target.value }))} style={inputStyle}>
+                  <option value="planificado">Planificado</option>
+                  <option value="en proceso">En proceso</option>
+                  <option value="completado">Completado</option>
+                </select>
+              </div>
+              {/* Notas */}
+              <div>
+                <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>Notas</label>
+                <textarea value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} rows={2} style={{ ...inputStyle, resize: "vertical" }} />
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: 10, marginTop: 20 }}>
+              <button onClick={() => setShowForm(false)} style={{ flex: 1, background: COLORS.bg, border: `1px solid ${COLORS.border}`, borderRadius: 10, padding: "10px", cursor: "pointer", color: COLORS.textMuted }}>Cancelar</button>
+              <button onClick={saveForm} disabled={!form.patientId || !form.professional}
+                style={{ flex: 2, background: !form.patientId || !form.professional ? COLORS.textDim : COLORS.accent, color: "#fff", border: "none", borderRadius: 10, padding: "10px", fontWeight: 700, cursor: "pointer", fontSize: 14 }}>
+                Guardar caso
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -2743,11 +3122,16 @@ function ImplantologiaView({ cases, setCases, patients }) {
 const ENDO_COLEGA_PCT = 60;
 
 // Calcula el pago total adeudado a profesionales (basado en lo cobrado)
-function calcColegasPagos(treatments, orthodonticsCases, implantologyCases) {
-  // Endodoncia: 60% de lo pagado
-  const endoPago = treatments
-    .filter(t => t.procedure === "Endodoncia")
-    .reduce((s, t) => s + Math.round((t.paid || 0) * ENDO_COLEGA_PCT / 100), 0);
+function calcColegasPagos(treatments, orthodonticsCases, implantologyCases, endodonticsCases) {
+  // Endodoncia: pago colega según % de cada caso (tabla endodontics)
+  const endoPago = (endodonticsCases || []).reduce((s, c) => {
+    const base = (c.total_cost || 0) - (c.lab_cost || 0);
+    const profTotal = Math.round(base * (c.professional_pct || ENDO_COLEGA_PCT) / 100);
+    const ratio = c.total_cost > 0 ? Math.min((c.paid || 0) / c.total_cost, 1) : 0;
+    return s + Math.round(profTotal * ratio);
+  }, 0)
+  // También incluye endodoncias registradas en historial clínico (tratamientos generales)
+  + treatments.filter(t => t.procedure === "Endodoncia").reduce((s, t) => s + Math.round((t.paid || 0) * ENDO_COLEGA_PCT / 100), 0);
 
   // Ortodoncia: pct% de la base (total - lab - brackets) × proporción cobrada
   const orthoPago = orthodonticsCases.reduce((s, c) => {
@@ -2768,7 +3152,7 @@ function calcColegasPagos(treatments, orthodonticsCases, implantologyCases) {
   return { endoPago, orthoPago, implPago, total: endoPago + orthoPago + implPago };
 }
 
-function DashboardView({ appointments, treatments, patients, orthodonticsCases, implantologyCases, setView, setAgendaConfig }) {
+function DashboardView({ appointments, treatments, patients, orthodonticsCases, implantologyCases, endodonticsCases, setView, setAgendaConfig }) {
   const todayAppts = appointments.filter(a => a.date === today());
   const pending = appointments.filter(a => a.status === "pendiente").length;
   const confirmed = appointments.filter(a => a.status === "confirmada").length;
@@ -2779,7 +3163,8 @@ function DashboardView({ appointments, treatments, patients, orthodonticsCases, 
   const mTreat = treatments.filter(t => t.date.startsWith(thisMonth));
   const mOrtho = orthodonticsCases.filter(c => (c.start_date || "").startsWith(thisMonth));
   const mImpl  = implantologyCases.filter(c => (c.date || "").startsWith(thisMonth));
-  const { endoPago, orthoPago, implPago, total: totalColegasPago } = calcColegasPagos(mTreat, mOrtho, mImpl);
+  const mEndo  = endodonticsCases.filter(c => (c.date || "").startsWith(thisMonth));
+  const { endoPago, orthoPago, implPago, total: totalColegasPago } = calcColegasPagos(mTreat, mOrtho, mImpl, mEndo);
   const netClinica = monthRevenue - endoPago - orthoPago - implPago;
 
   const goAgenda = (filter = "", date = today()) => {
@@ -4411,6 +4796,7 @@ export default function App() {
   const [aestheticCases, setAestheticCases] = useState([]);
   const [orthodonticsCases, setOrthodonticsCases] = useState([]);
   const [implantologyCases, setImplantologyCases] = useState([]);
+  const [endodonticsCases, setEndodonticsCases]   = useState([]);
   const [selectedPatient, setSelectedPatient] = useState(null);
   const [loading, setLoading] = useState(true);
   const [session, setSession] = useState(null);
@@ -4449,7 +4835,8 @@ export default function App() {
       supabase.from("aesthetic_cases").select("*").order("id", { ascending: false }).then(r => r).catch(() => ({ data: [] })),
       supabase.from("orthodontics").select("*").order("id", { ascending: false }).then(r => r).catch(() => ({ data: [] })),
       supabase.from("implantology").select("*").order("id", { ascending: false }).then(r => r).catch(() => ({ data: [] })),
-    ]).then(([p, a, t, b, ac, orth, impl]) => {
+      supabase.from("endodontics").select("*").order("id", { ascending: false }).then(r => r).catch(() => ({ data: [] })),
+    ]).then(([p, a, t, b, ac, orth, impl, endo]) => {
       setPatients(p.data || []);
       setAppointments((a.data || []).map(toAppt));
       setTreatments((t.data || []).map(toTreat));
@@ -4457,13 +4844,14 @@ export default function App() {
       setAestheticCases(((ac && ac.data) || []).map(toAesthetic));
       setOrthodonticsCases(((orth && orth.data) || []).map(r => ({ ...r, patientId: r.patient_id, controls: r.controls || [] })));
       setImplantologyCases(((impl && impl.data) || []).map(r => ({ ...r, patientId: r.patient_id, phases: r.phases || [] })));
+      setEndodonticsCases(((endo && endo.data) || []).map(r => ({ ...r, patientId: r.patient_id, sessions: r.sessions || [] })));
       setLoading(false);
     });
   };
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
-    setPatients([]); setAppointments([]); setTreatments([]); setBudgets([]); setAestheticCases([]); setOrthodonticsCases([]); setImplantologyCases([]);
+    setPatients([]); setAppointments([]); setTreatments([]); setBudgets([]); setAestheticCases([]); setOrthodonticsCases([]); setImplantologyCases([]); setEndodonticsCases([]);
   };
 
   // ── Google Calendar ────────────────────────────────────────────────
@@ -4572,7 +4960,8 @@ export default function App() {
     { id: "treatments",     label: "Historial Clínico", icon: "🦷" },
     { id: "budgets",        label: "Presupuestos",      icon: "📋" },
     { id: "aesthetic",      label: "Estética Dental",   icon: "✨" },
-    { id: "orthodontics",   label: "Ortodoncia",        icon: "🦷" },
+    { id: "endodontics",    label: "Endodoncia",        icon: "🦷" },
+    { id: "orthodontics",   label: "Ortodoncia",        icon: "🔧" },
     { id: "implantology",   label: "Implantología",     icon: "⚙️" },
     { id: "performance",    label: "Rendimiento",       icon: "📊" },
   ];
@@ -4678,15 +5067,16 @@ export default function App() {
 
         {/* Vistas */}
         <div style={{ padding: "28px 28px", flex: 1, maxWidth: 900, width: "100%" }}>
-          {view === "dashboard"   && <DashboardView appointments={appointments} treatments={treatments} patients={patients} orthodonticsCases={orthodonticsCases} implantologyCases={implantologyCases} setView={setView} setAgendaConfig={setAgendaConfig} />}
+          {view === "dashboard"   && <DashboardView appointments={appointments} treatments={treatments} patients={patients} orthodonticsCases={orthodonticsCases} implantologyCases={implantologyCases} endodonticsCases={endodonticsCases} setView={setView} setAgendaConfig={setAgendaConfig} />}
           {view === "agenda"      && <AgendaView key={agendaConfig.date + agendaConfig.filter} appointments={appointments} patients={patients} setAppointments={setAppointments} setView={setView} setSelectedPatient={setSelectedPatient} initialDate={agendaConfig.date} initialFilter={agendaConfig.filter} syncGCal={syncGCal} gcalConnected={gcalConnected} connectGCal={connectGCal} />}
           {view === "patients"    && <PatientsView patients={patients} setPatients={setPatients} appointments={appointments} treatments={treatments} setTreatments={setTreatments} selectedPatient={selectedPatient} setSelectedPatient={setSelectedPatient} />}
           {view === "treatments"  && <TreatmentsView treatments={treatments} setTreatments={setTreatments} patients={patients} />}
           {view === "budgets"     && <BudgetView budgets={budgets} setBudgets={setBudgets} patients={patients} treatments={treatments} setTreatments={setTreatments} />}
           {view === "aesthetic"    && <AestheticView aestheticCases={aestheticCases} setAestheticCases={setAestheticCases} patients={patients} />}
+          {view === "endodontics"  && <EndodonciaView cases={endodonticsCases} setCases={setEndodonticsCases} patients={patients} />}
           {view === "orthodontics" && <OrtodonciaView cases={orthodonticsCases} setCases={setOrthodonticsCases} patients={patients} />}
           {view === "implantology" && <ImplantologiaView cases={implantologyCases} setCases={setImplantologyCases} patients={patients} />}
-          {view === "performance"  && <PerformanceView appointments={appointments} treatments={treatments} patients={patients} orthodonticsCases={orthodonticsCases} implantologyCases={implantologyCases} />}
+          {view === "performance"  && <PerformanceView appointments={appointments} treatments={treatments} patients={patients} orthodonticsCases={orthodonticsCases} implantologyCases={implantologyCases} endodonticsCases={endodonticsCases} />}
         </div>
       </main>
 
