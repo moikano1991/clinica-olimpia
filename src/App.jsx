@@ -1406,7 +1406,8 @@ function TreatmentsView({ treatments, setTreatments, patients }) {
       <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
         {sorted.map(t => {
           const p = getPatient(t.patientId);
-          const debt = t.cost - t.paid;
+          const isChargeable = t.status === "completado" || t.status === "pendiente pago";
+          const debt = isChargeable ? t.cost - t.paid : 0;
           return (
             <div key={t.id} style={{ background: COLORS.card, border: `1px solid ${COLORS.border}`, borderRadius: 12, padding: "14px 18px" }}>
               <div style={{ display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
@@ -2073,7 +2074,7 @@ function OrtodonciaView({ cases, setCases, patients }) {
 
   const totalActivos   = cases.filter(c => c.status === "activo").length;
   const totalCobrado   = cases.reduce((s, c) => s + (c.paid || 0), 0);
-  const totalDeuda     = cases.reduce((s, c) => s + Math.max(0, (c.total_cost || 0) - (c.paid || 0)), 0);
+  const totalDeuda     = cases.filter(c => c.status === "activo" || c.status === "completado").reduce((s, c) => s + Math.max(0, (c.total_cost || 0) - (c.paid || 0)), 0);
   const totalProfPay   = cases.reduce((s, c) => s + calcEarnings(c).profEarnings, 0);
 
   return (
@@ -2111,6 +2112,7 @@ function OrtodonciaView({ cases, setCases, patients }) {
             {cases.map(c => {
               const p = getPatient(c.patientId);
               const { profEarnings, clinicEarnings, debt } = calcEarnings(c);
+              const showDebt = debt > 0 && (c.status === "activo" || c.status === "completado");
               return (
                 <div key={c.id} onClick={() => setDetail(c.id)}
                   style={{ background: COLORS.card, border: `1px solid ${COLORS.border}`, borderRadius: 12, padding: "14px 18px", cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
@@ -2121,7 +2123,7 @@ function OrtodonciaView({ cases, setCases, patients }) {
                   </div>
                   <div style={{ textAlign: "right", flexShrink: 0 }}>
                     <div style={{ fontWeight: 700, fontSize: 14, color: COLORS.text }}>{formatCLP(c.total_cost)}</div>
-                    {debt > 0 && <div style={{ fontSize: 12, color: COLORS.danger }}>Debe {formatCLP(debt)}</div>}
+                    {showDebt && <div style={{ fontSize: 12, color: COLORS.danger }}>Debe {formatCLP(debt)}</div>}
                     <span style={{ background: statusBg[c.status] || COLORS.bg, color: statusColor[c.status] || COLORS.textMuted, borderRadius: 20, padding: "2px 10px", fontSize: 11, fontWeight: 700 }}>{c.status}</span>
                   </div>
                 </div>
@@ -2443,7 +2445,7 @@ function ImplantologiaView({ cases, setCases, patients }) {
 
   const detailCase = cases.find(c => c.id === detail);
   const totalCobrado = cases.reduce((s, c) => s + (c.paid || 0), 0);
-  const totalDeuda   = cases.reduce((s, c) => s + Math.max(0, (c.total_cost || 0) - (c.paid || 0)), 0);
+  const totalDeuda   = cases.filter(c => c.status === "en proceso" || c.status === "completado").reduce((s, c) => s + Math.max(0, (c.total_cost || 0) - (c.paid || 0)), 0);
   const totalProfPay = cases.reduce((s, c) => s + calcEarnings(c).profEarnings, 0);
   const enProceso    = cases.filter(c => c.status === "en proceso").length;
 
@@ -2482,6 +2484,7 @@ function ImplantologiaView({ cases, setCases, patients }) {
             {cases.map(c => {
               const p = getPatient(c.patientId);
               const { debt } = calcEarnings(c);
+              const showDebt = debt > 0 && (c.status === "en proceso" || c.status === "completado");
               return (
                 <div key={c.id} onClick={() => setDetail(c.id)}
                   style={{ background: COLORS.card, border: `1px solid ${COLORS.border}`, borderRadius: 12, padding: "14px 18px", cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
@@ -2492,7 +2495,7 @@ function ImplantologiaView({ cases, setCases, patients }) {
                   </div>
                   <div style={{ textAlign: "right", flexShrink: 0 }}>
                     <div style={{ fontWeight: 700, fontSize: 14, color: COLORS.text }}>{formatCLP(c.total_cost)}</div>
-                    {debt > 0 && <div style={{ fontSize: 12, color: COLORS.danger }}>Debe {formatCLP(debt)}</div>}
+                    {showDebt && <div style={{ fontSize: 12, color: COLORS.danger }}>Debe {formatCLP(debt)}</div>}
                     <span style={{ background: statusBg[c.status] || COLORS.bg, color: statusColor[c.status] || COLORS.textMuted, borderRadius: 20, padding: "2px 10px", fontSize: 11, fontWeight: 700 }}>{c.status}</span>
                   </div>
                 </div>
