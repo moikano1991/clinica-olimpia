@@ -1666,7 +1666,7 @@ function TreatmentsView({ treatments, setTreatments, patients }) {
 }
 
 // ── Dashboard de rendimiento mensual ────────────────────────────────
-function PerformanceView({ appointments, treatments, patients }) {
+function PerformanceView({ appointments, treatments, patients, orthodonticsCases, implantologyCases }) {
   const [month, setMonth] = useState(() => today().slice(0, 7));
 
   const prevMonthStr = (m) => {
@@ -1700,6 +1700,31 @@ function PerformanceView({ appointments, treatments, patients }) {
   const collRate  = billed > 0 ? Math.round(revenue / billed * 100) : 0;
   const prevRev   = pmT.reduce((s, t) => s + (t.paid || 0), 0);
   const prevBill  = pmT.reduce((s, t) => s + (t.cost || 0), 0);
+
+  // Pago a colegas del mes
+  const mOrtho = (orthodonticsCases || []).filter(c => (c.start_date || "").startsWith(month));
+  const mImpl  = (implantologyCases || []).filter(c => (c.date || "").startsWith(month));
+  const { endoPago: endoPagoM, orthoPago: orthoPagoM, implPago: implPagoM, total: totalColegasM } = calcColegasPagos(mT, mOrtho, mImpl);
+  const netClinicaM = revenue - totalColegasM;
+
+  // Pago a colegas acumulado total (todos los tiempos)
+  const { endoPago: endoPagoTotal, orthoPago: orthoPagoTotal, implPago: implPagoTotal, total: totalColegasTotal } = calcColegasPagos(treatments, orthodonticsCases || [], implantologyCases || []);
+
+  // Desglose por profesional (ortodoncia + implantología)
+  const profMap = {};
+  [...(orthodonticsCases || []), ...(implantologyCases || [])].forEach(c => {
+    if (!c.professional) return;
+    const isOrtho = "start_date" in c;
+    const base = isOrtho
+      ? (c.total_cost || 0) - (c.lab_cost || 0) - (c.bracket_cost || 0)
+      : (c.total_cost || 0) - (c.lab_cost || 0);
+    const profTotal = Math.round(base * (c.professional_pct || 0) / 100);
+    const ratio = c.total_cost > 0 ? Math.min((c.paid || 0) / c.total_cost, 1) : 0;
+    const pago = Math.round(profTotal * ratio);
+    if (!profMap[c.professional]) profMap[c.professional] = { pago: 0, casos: 0, pct: c.professional_pct };
+    profMap[c.professional].pago += pago;
+    profMap[c.professional].casos++;
+  });
 
   const totalA    = mA.length;
   const confirmedA = mA.filter(a => ["confirmada", "completada", "completado"].includes(a.status)).length;
@@ -1774,10 +1799,12 @@ function PerformanceView({ appointments, treatments, patients }) {
 
       {/* Fila 1: Ingresos */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 12, marginBottom: 12 }}>
-        <Card icon="💰" label="Ingresos cobrados" value={formatCLP(revenue)} sub={`vs ${formatCLP(prevRev)} mes ant.`} delta={delta(revenue, prevRev)} bg="#f0fdf4" />
-        <Card icon="📋" label="Total facturado"   value={formatCLP(billed)}  sub={`vs ${formatCLP(prevBill)} mes ant.`} delta={delta(billed, prevBill)}   bg="#eff6ff" />
-        <Card icon="💸" label="Por cobrar"        value={formatCLP(debt)}    sub={`${mT.filter(t=>(t.status==="completado"||t.status==="pendiente pago")&&t.cost>t.paid).length} tratamientos`} bg="#fff1f2" color={COLORS.danger} />
-        <Card icon="📊" label="Tasa de cobro"     value={`${collRate}%`}     sub={`${mT.length} tratamientos`} bg="#fdf4ff" color="#7c3aed" />
+        <Card icon="💰" label="Ingresos cobrados" value={formatCLP(revenue)}      sub={`vs ${formatCLP(prevRev)} mes ant.`} delta={delta(revenue, prevRev)} bg="#f0fdf4" />
+        <Card icon="📋" label="Total facturado"   value={formatCLP(billed)}       sub={`vs ${formatCLP(prevBill)} mes ant.`} delta={delta(billed, prevBill)}   bg="#eff6ff" />
+        <Card icon="👨‍⚕️" label="Pago colegas"    value={formatCLP(totalColegasM)} sub={`Endo ${formatCLP(endoPagoM)} · Ortod ${formatCLP(orthoPagoM)} · Impl ${formatCLP(implPagoM)}`} bg="#f5f3ff" color="#7c3aed" />
+        <Card icon="🏥" label="Neto clínica"      value={formatCLP(netClinicaM)}  sub="Cobrado menos pago colegas" bg="#f0fdf4" color={COLORS.success} />
+        <Card icon="💸" label="Por cobrar"        value={formatCLP(debt)}         sub={`${mT.filter(t=>(t.status==="completado"||t.status==="pendiente pago")&&t.cost>t.paid).length} tratamientos`} bg="#fff1f2" color={COLORS.danger} />
+        <Card icon="📊" label="Tasa de cobro"     value={`${collRate}%`}          sub={`${mT.length} tratamientos`} bg="#fdf4ff" color="#7c3aed" />
       </div>
 
       {/* Fila 2: Citas */}
@@ -1889,6 +1916,54 @@ function PerformanceView({ appointments, treatments, patients }) {
         </div>
       </div>
 
+      {/* Pago a colegas */}
+      <div style={{ background: COLORS.card, border: `1px solid ${COLORS.border}`, borderRadius: 14, padding: "20px 18px", marginBottom: 16 }}>
+        <h3 style={{ margin: "0 0 16px", color: COLORS.text, fontSize: 15 }}>👨‍⚕️ Distribución a colegas</h3>
+
+        {/* Mes actual */}
+        <div style={{ marginBottom: 16 }}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: COLORS.textMuted, textTransform: "uppercase", letterSpacing: 1, marginBottom: 10 }}>Este mes — {monthLabel}</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 0, background: COLORS.bg, borderRadius: 12, overflow: "hidden", border: `1px solid ${COLORS.border}` }}>
+            {[
+              { label: `Endodoncia (${ENDO_COLEGA_PCT}% colega)`,    value: endoPagoM,   icon: "🦷", count: mT.filter(t => t.procedure === "Endodoncia").length + " trat." },
+              { label: `Ortodoncia (% por caso)`,                    value: orthoPagoM,  icon: "🔧", count: mOrtho.length + " casos" },
+              { label: `Implantología (% por caso)`,                 value: implPagoM,   icon: "⚙️", count: mImpl.length + " casos" },
+            ].map((row, i) => (
+              <div key={row.label} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", borderBottom: i < 2 ? `1px solid ${COLORS.border}` : "none" }}>
+                <span style={{ color: COLORS.textMuted, fontSize: 13 }}>{row.icon} {row.label} <span style={{ color: COLORS.textDim, fontSize: 11 }}>({row.count})</span></span>
+                <span style={{ fontWeight: 700, color: "#7c3aed", fontSize: 13 }}>{formatCLP(row.value)}</span>
+              </div>
+            ))}
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 14px", background: "#f5f3ff", borderTop: `2px solid #c4b5fd` }}>
+              <span style={{ fontWeight: 700, color: "#7c3aed", fontSize: 14 }}>Total pago colegas</span>
+              <span style={{ fontWeight: 800, color: "#7c3aed", fontSize: 16 }}>{formatCLP(totalColegasM)}</span>
+            </div>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 14px", background: "#f0fdf4", borderTop: `1px solid #86efac` }}>
+              <span style={{ fontWeight: 700, color: COLORS.success, fontSize: 14 }}>🏥 Neto clínica</span>
+              <span style={{ fontWeight: 800, color: COLORS.success, fontSize: 16 }}>{formatCLP(netClinicaM)}</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Desglose por profesional (ortodoncia + implantología) */}
+        {Object.keys(profMap).length > 0 && (
+          <div>
+            <div style={{ fontSize: 12, fontWeight: 700, color: COLORS.textMuted, textTransform: "uppercase", letterSpacing: 1, marginBottom: 10 }}>Por profesional (acumulado total)</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              {Object.entries(profMap).sort((a, b) => b[1].pago - a[1].pago).map(([name, data]) => (
+                <div key={name} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", background: COLORS.bg, borderRadius: 10, padding: "10px 14px" }}>
+                  <div>
+                    <div style={{ fontWeight: 700, color: COLORS.text, fontSize: 13 }}>👨‍⚕️ {name}</div>
+                    <div style={{ color: COLORS.textDim, fontSize: 11 }}>{data.casos} caso{data.casos !== 1 ? "s" : ""} · {data.pct}% comisión</div>
+                  </div>
+                  <span style={{ fontWeight: 800, color: "#7c3aed", fontSize: 15 }}>{formatCLP(data.pago)}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+
       {/* Resumen vs mes anterior */}
       <div style={{ background: COLORS.card, border: `1px solid ${COLORS.border}`, borderRadius: 14, padding: "20px 18px" }}>
         <h3 style={{ margin: "0 0 16px", color: COLORS.text, fontSize: 15 }}>📈 Comparación vs mes anterior</h3>
@@ -1915,13 +1990,794 @@ function PerformanceView({ appointments, treatments, patients }) {
   );
 }
 
-function DashboardView({ appointments, treatments, patients, setView, setAgendaConfig }) {
+// ═══════════════════════════════════════════════════════
+// ORTODONCIA
+// ═══════════════════════════════════════════════════════
+function OrtodonciaView({ cases, setCases, patients }) {
+  const toOrtho = (r) => ({ ...r, patientId: r.patient_id, controls: r.controls || [] });
+  const getPatient = (id) => patients.find(p => p.id === Number(id));
+
+  const defaultForm = { patientId: "", professional: "", professional_pct: 40, start_date: today(), estimated_end: "", total_cost: "", lab_cost: "", bracket_cost: "", paid: "", status: "activo", notes: "" };
+  const [showForm, setShowForm] = useState(false);
+  const [form, setForm] = useState(defaultForm);
+  const [patSearch, setPatSearch] = useState("");
+  const [patSugg, setPatSugg] = useState([]);
+  const [detail, setDetail] = useState(null);
+  const [addControl, setAddControl] = useState(false);
+  const [controlForm, setControlForm] = useState({ date: today(), notes: "" });
+  const [payInput, setPayInput] = useState("");
+
+  const handlePatSearch = (val) => {
+    setPatSearch(val); setForm(f => ({ ...f, patientId: "" }));
+    if (!val.trim()) { setPatSugg([]); return; }
+    const q = val.toLowerCase().replace(/\./g, "").replace(/-/g, "");
+    setPatSugg(patients.filter(p => p.name?.toLowerCase().includes(q) || p.rut?.replace(/\./g,"").replace(/-/g,"").toLowerCase().includes(q)).slice(0, 6));
+  };
+
+  const saveForm = async () => {
+    if (!form.patientId || !form.professional) return;
+    const payload = {
+      patient_id: Number(form.patientId), professional: form.professional,
+      professional_pct: Number(form.professional_pct) || 0,
+      start_date: form.start_date, estimated_end: form.estimated_end || null,
+      total_cost: Number(form.total_cost) || 0, lab_cost: Number(form.lab_cost) || 0,
+      bracket_cost: Number(form.bracket_cost) || 0, paid: Number(form.paid) || 0,
+      status: form.status, notes: form.notes, controls: [],
+    };
+    const { data, error } = await supabase.from("orthodontics").insert([payload]).select().single();
+    if (!error) { setCases(prev => [toOrtho(data), ...prev]); setShowForm(false); setForm(defaultForm); setPatSearch(""); }
+    else alert("Error: " + error.message);
+  };
+
+  const addControlToCase = async (caseId) => {
+    const c = cases.find(x => x.id === caseId);
+    if (!c) return;
+    const newControls = [...(c.controls || []), { date: controlForm.date, notes: controlForm.notes }];
+    const { error } = await supabase.from("orthodontics").update({ controls: newControls }).eq("id", caseId);
+    if (!error) { setCases(prev => prev.map(x => x.id === caseId ? { ...x, controls: newControls } : x)); setAddControl(false); setControlForm({ date: today(), notes: "" }); }
+  };
+
+  const deleteCase = async (id) => {
+    if (!window.confirm("¿Eliminar este caso?")) return;
+    await supabase.from("orthodontics").delete().eq("id", id);
+    setCases(prev => prev.filter(x => x.id !== id)); setDetail(null);
+  };
+
+  const updateStatus = async (id, status) => {
+    await supabase.from("orthodontics").update({ status }).eq("id", id);
+    setCases(prev => prev.map(x => x.id === id ? { ...x, status } : x));
+  };
+
+  const registerPay = async (c) => {
+    const amount = Number(payInput) || 0;
+    if (!amount) return;
+    const newPaid = Math.min((c.paid || 0) + amount, c.total_cost);
+    await supabase.from("orthodontics").update({ paid: newPaid }).eq("id", c.id);
+    setCases(prev => prev.map(x => x.id === c.id ? { ...x, paid: newPaid } : x));
+    setPayInput("");
+  };
+
+  const calcEarnings = (c) => {
+    const base = (c.total_cost || 0) - (c.lab_cost || 0) - (c.bracket_cost || 0);
+    const profEarnings = Math.round(base * (c.professional_pct || 0) / 100);
+    const clinicEarnings = base - profEarnings;
+    const debt = (c.total_cost || 0) - (c.paid || 0);
+    return { base, profEarnings, clinicEarnings, debt };
+  };
+
+  const statusColor = { activo: COLORS.accent, completado: COLORS.success, abandonado: COLORS.textMuted };
+  const statusBg    = { activo: "#eff6ff", completado: "#f0fdf4", abandonado: COLORS.bg };
+  const inputStyle  = { width: "100%", padding: "8px 12px", border: `1px solid ${COLORS.border}`, borderRadius: 8, fontSize: 13, color: COLORS.text, background: COLORS.bg, boxSizing: "border-box" };
+
+  const detailCase = cases.find(c => c.id === detail);
+
+  const totalActivos   = cases.filter(c => c.status === "activo").length;
+  const totalCobrado   = cases.reduce((s, c) => s + (c.paid || 0), 0);
+  const totalDeuda     = cases.reduce((s, c) => s + Math.max(0, (c.total_cost || 0) - (c.paid || 0)), 0);
+  const totalProfPay   = cases.reduce((s, c) => s + calcEarnings(c).profEarnings, 0);
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <div>
+          <h2 style={{ margin: 0, color: COLORS.text, fontSize: 20 }}>🦷 Ortodoncia</h2>
+          <p style={{ margin: "4px 0 0", color: COLORS.textMuted, fontSize: 13 }}>{cases.length} caso{cases.length !== 1 ? "s" : ""} registrado{cases.length !== 1 ? "s" : ""}</p>
+        </div>
+        <button onClick={() => setShowForm(true)} style={{ background: COLORS.accent, color: "#fff", border: "none", borderRadius: 10, padding: "10px 18px", fontWeight: 700, cursor: "pointer", fontSize: 13 }}>+ Nuevo caso</button>
+      </div>
+
+      {cases.length > 0 && (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 10 }}>
+          {[
+            { label: "Casos activos", value: totalActivos, icon: "⚡", color: COLORS.accent, bg: "#eff6ff" },
+            { label: "Cobrado", value: formatCLP(totalCobrado), icon: "💰", color: COLORS.success, bg: "#f0fdf4" },
+            { label: "Por cobrar", value: formatCLP(totalDeuda), icon: "💸", color: COLORS.danger, bg: "#fff1f2" },
+            { label: "Pago profesionales", value: formatCLP(totalProfPay), icon: "👨‍⚕️", color: "#7c3aed", bg: "#f5f3ff" },
+          ].map(card => (
+            <div key={card.label} style={{ background: card.bg, borderRadius: 12, padding: "14px 16px" }}>
+              <div style={{ fontSize: 11, color: COLORS.textMuted, marginBottom: 4 }}>{card.icon} {card.label}</div>
+              <div style={{ fontWeight: 800, fontSize: 17, color: card.color }}>{card.value}</div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {cases.length === 0
+        ? <div style={{ textAlign: "center", color: COLORS.textDim, padding: 60, background: COLORS.card, borderRadius: 14, border: `1px solid ${COLORS.border}` }}>
+            <div style={{ fontSize: 40, marginBottom: 8 }}>🦷</div>
+            <div>No hay casos de ortodoncia registrados</div>
+          </div>
+        : <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            {cases.map(c => {
+              const p = getPatient(c.patientId);
+              const { profEarnings, clinicEarnings, debt } = calcEarnings(c);
+              return (
+                <div key={c.id} onClick={() => setDetail(c.id)}
+                  style={{ background: COLORS.card, border: `1px solid ${COLORS.border}`, borderRadius: 12, padding: "14px 18px", cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontWeight: 700, fontSize: 15, color: COLORS.text }}>{p?.name || "—"}</div>
+                    <div style={{ fontSize: 12, color: COLORS.textMuted, marginTop: 2 }}>👨‍⚕️ {c.professional} · {c.professional_pct}% comisión</div>
+                    <div style={{ fontSize: 11, color: COLORS.textDim, marginTop: 2 }}>Inicio: {formatDate(c.start_date)}{c.estimated_end ? ` · Fin est.: ${formatDate(c.estimated_end)}` : ""}</div>
+                  </div>
+                  <div style={{ textAlign: "right", flexShrink: 0 }}>
+                    <div style={{ fontWeight: 700, fontSize: 14, color: COLORS.text }}>{formatCLP(c.total_cost)}</div>
+                    {debt > 0 && <div style={{ fontSize: 12, color: COLORS.danger }}>Debe {formatCLP(debt)}</div>}
+                    <span style={{ background: statusBg[c.status] || COLORS.bg, color: statusColor[c.status] || COLORS.textMuted, borderRadius: 20, padding: "2px 10px", fontSize: 11, fontWeight: 700 }}>{c.status}</span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+      }
+
+      {/* MODAL DETALLE */}
+      {detailCase && (() => {
+        const p = getPatient(detailCase.patientId);
+        const { base, profEarnings, clinicEarnings, debt } = calcEarnings(detailCase);
+        return (
+          <div style={{ position: "fixed", inset: 0, background: "#00000088", zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+            <div style={{ background: COLORS.surface, borderRadius: 18, padding: 28, width: "100%", maxWidth: 560, maxHeight: "90vh", overflowY: "auto", display: "flex", flexDirection: "column", gap: 18 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <h3 style={{ margin: 0, color: COLORS.text }}>🦷 Caso Ortodoncia</h3>
+                <button onClick={() => { setDetail(null); setPayInput(""); }} style={{ background: "none", border: "none", fontSize: 24, cursor: "pointer", color: COLORS.textMuted }}>×</button>
+              </div>
+
+              <div style={{ background: COLORS.accent + "15", borderRadius: 10, padding: "12px 16px" }}>
+                <div style={{ fontWeight: 700, color: COLORS.text, fontSize: 15 }}>{p?.name}</div>
+                <div style={{ color: COLORS.textMuted, fontSize: 13 }}>👨‍⚕️ {detailCase.professional} · {detailCase.professional_pct}% comisión</div>
+                <div style={{ color: COLORS.textDim, fontSize: 12, marginTop: 4 }}>
+                  {formatDate(detailCase.start_date)}{detailCase.estimated_end ? ` → ${formatDate(detailCase.estimated_end)}` : ""}
+                </div>
+                <div style={{ marginTop: 6 }}>
+                  <select value={detailCase.status} onChange={e => updateStatus(detailCase.id, e.target.value)}
+                    style={{ fontSize: 12, fontWeight: 700, padding: "3px 10px", borderRadius: 20, border: "none", background: statusBg[detailCase.status] || COLORS.bg, color: statusColor[detailCase.status] || COLORS.textMuted, cursor: "pointer" }}>
+                    <option value="activo">Activo</option>
+                    <option value="completado">Completado</option>
+                    <option value="abandonado">Abandonado</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Desglose financiero */}
+              <div style={{ background: COLORS.bg, borderRadius: 12, padding: "16px 18px" }}>
+                <div style={{ fontWeight: 700, color: COLORS.text, marginBottom: 10, fontSize: 13 }}>💵 Desglose financiero</div>
+                {[
+                  { label: "Total tratamiento", value: formatCLP(detailCase.total_cost), bold: true },
+                  { label: "Laboratorios (excluido %)", value: `– ${formatCLP(detailCase.lab_cost)}`, color: COLORS.textMuted },
+                  { label: "Reposición brackets (excluido %)", value: `– ${formatCLP(detailCase.bracket_cost)}`, color: COLORS.textMuted },
+                  { label: "Base para comisión", value: formatCLP(base), color: COLORS.accent, separator: true },
+                  { label: `Profesional (${detailCase.professional_pct}%)`, value: formatCLP(profEarnings), color: "#7c3aed" },
+                  { label: `Clínica (${100 - detailCase.professional_pct}%)`, value: formatCLP(clinicEarnings), color: COLORS.success },
+                ].map(row => (
+                  <div key={row.label} style={{ display: "flex", justifyContent: "space-between", fontSize: 13, paddingBottom: 7, marginBottom: 7, borderBottom: `1px solid ${COLORS.border}` }}>
+                    <span style={{ color: COLORS.textMuted }}>{row.label}</span>
+                    <span style={{ fontWeight: row.bold ? 700 : 600, color: row.color || COLORS.text }}>{row.value}</span>
+                  </div>
+                ))}
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 14, marginTop: 4 }}>
+                  <span style={{ color: COLORS.textMuted }}>Pagado</span>
+                  <span style={{ fontWeight: 700, color: COLORS.success }}>{formatCLP(detailCase.paid)}</span>
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 14, marginTop: 4 }}>
+                  <span style={{ color: COLORS.textMuted }}>Por cobrar</span>
+                  <span style={{ fontWeight: 700, color: debt > 0 ? COLORS.danger : COLORS.success }}>{formatCLP(debt)}</span>
+                </div>
+                <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+                  <input type="number" placeholder="Monto a registrar" value={payInput} onChange={e => setPayInput(e.target.value)}
+                    style={{ flex: 1, padding: "7px 10px", border: `1px solid ${COLORS.border}`, borderRadius: 8, fontSize: 13 }} />
+                  <button onClick={() => registerPay(detailCase)}
+                    style={{ background: COLORS.success, color: "#fff", border: "none", borderRadius: 8, padding: "7px 14px", fontWeight: 700, cursor: "pointer", fontSize: 13 }}>
+                    + Pago
+                  </button>
+                </div>
+              </div>
+
+              {/* Controles */}
+              <div>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+                  <div style={{ fontWeight: 700, color: COLORS.text, fontSize: 13 }}>📋 Controles ({(detailCase.controls || []).length})</div>
+                  <button onClick={() => setAddControl(true)}
+                    style={{ background: COLORS.accent + "18", color: COLORS.accent, border: `1px solid ${COLORS.accent}44`, borderRadius: 8, padding: "5px 12px", fontSize: 12, cursor: "pointer", fontWeight: 700 }}>
+                    + Agregar
+                  </button>
+                </div>
+                {(detailCase.controls || []).length === 0
+                  ? <div style={{ color: COLORS.textDim, fontSize: 13, fontStyle: "italic" }}>Sin controles registrados</div>
+                  : <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                      {[...(detailCase.controls || [])].reverse().map((ctrl, i) => (
+                        <div key={i} style={{ background: COLORS.bg, borderRadius: 8, padding: "8px 12px" }}>
+                          <div style={{ fontWeight: 600, color: COLORS.accent, fontSize: 12 }}>{formatDate(ctrl.date)}</div>
+                          <div style={{ color: COLORS.text, fontSize: 13, marginTop: 2 }}>{ctrl.notes || "—"}</div>
+                        </div>
+                      ))}
+                    </div>
+                }
+              </div>
+
+              {detailCase.notes && (
+                <div style={{ background: COLORS.bg, borderRadius: 8, padding: "10px 14px", fontSize: 13, color: COLORS.textMuted }}>📝 {detailCase.notes}</div>
+              )}
+
+              <button onClick={() => deleteCase(detailCase.id)}
+                style={{ background: COLORS.danger + "18", color: COLORS.danger, border: `1px solid ${COLORS.danger}44`, borderRadius: 8, padding: "9px", fontWeight: 700, cursor: "pointer", fontSize: 13 }}>
+                🗑 Eliminar caso
+              </button>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* MODAL AGREGAR CONTROL */}
+      {addControl && detail && (
+        <div style={{ position: "fixed", inset: 0, background: "#00000088", zIndex: 300, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+          <div style={{ background: COLORS.surface, borderRadius: 16, padding: 24, width: "100%", maxWidth: 400 }}>
+            <h4 style={{ margin: "0 0 16px", color: COLORS.text }}>📋 Agregar control</h4>
+            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              <div>
+                <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>Fecha</label>
+                <input type="date" value={controlForm.date} onChange={e => setControlForm(f => ({ ...f, date: e.target.value }))} style={inputStyle} />
+              </div>
+              <div>
+                <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>Observaciones</label>
+                <textarea value={controlForm.notes} onChange={e => setControlForm(f => ({ ...f, notes: e.target.value }))} rows={3}
+                  placeholder="Ajustes, evolución, observaciones..." style={{ ...inputStyle, resize: "vertical" }} />
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
+              <button onClick={() => setAddControl(false)} style={{ flex: 1, background: COLORS.bg, border: `1px solid ${COLORS.border}`, borderRadius: 8, padding: "9px", cursor: "pointer", color: COLORS.textMuted }}>Cancelar</button>
+              <button onClick={() => addControlToCase(detail)} style={{ flex: 1, background: COLORS.accent, color: "#fff", border: "none", borderRadius: 8, padding: "9px", cursor: "pointer", fontWeight: 700 }}>Guardar</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL NUEVO CASO */}
+      {showForm && (
+        <div style={{ position: "fixed", inset: 0, background: "#00000088", zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+          <div style={{ background: COLORS.surface, borderRadius: 18, padding: 28, width: "100%", maxWidth: 520, maxHeight: "90vh", overflowY: "auto" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+              <h3 style={{ margin: 0, color: COLORS.text }}>🦷 Nuevo caso ortodoncia</h3>
+              <button onClick={() => setShowForm(false)} style={{ background: "none", border: "none", fontSize: 22, cursor: "pointer", color: COLORS.textMuted }}>×</button>
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+              <div style={{ position: "relative" }}>
+                <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>Paciente *</label>
+                <input value={patSearch} onChange={e => handlePatSearch(e.target.value)} placeholder="Buscar paciente..." style={inputStyle} />
+                {patSugg.length > 0 && (
+                  <div style={{ position: "absolute", top: "100%", left: 0, right: 0, background: COLORS.card, border: `1px solid ${COLORS.border}`, borderRadius: 10, zIndex: 300, boxShadow: "0 8px 24px rgba(0,0,0,0.12)", marginTop: 4 }}>
+                    {patSugg.map(p => (
+                      <div key={p.id} onClick={() => { setPatSearch(p.name); setForm(f => ({ ...f, patientId: String(p.id) })); setPatSugg([]); }}
+                        style={{ padding: "10px 14px", cursor: "pointer", display: "flex", justifyContent: "space-between", borderBottom: `1px solid ${COLORS.border}` }}
+                        onMouseEnter={e => e.currentTarget.style.background = COLORS.bg}
+                        onMouseLeave={e => e.currentTarget.style.background = ""}>
+                        <span style={{ fontWeight: 600 }}>{p.name}</span>
+                        {p.rut && <span style={{ color: COLORS.textMuted, fontSize: 12 }}>{p.rut}</span>}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <div>
+                <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>Profesional *</label>
+                <input value={form.professional} onChange={e => setForm(f => ({ ...f, professional: e.target.value }))} placeholder="Nombre del ortodoncista" style={inputStyle} />
+              </div>
+              <div>
+                <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>% Comisión profesional</label>
+                <input type="number" value={form.professional_pct} min={0} max={100} onChange={e => setForm(f => ({ ...f, professional_pct: e.target.value }))} style={inputStyle} />
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                <div>
+                  <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>Fecha inicio</label>
+                  <input type="date" value={form.start_date} onChange={e => setForm(f => ({ ...f, start_date: e.target.value }))} style={inputStyle} />
+                </div>
+                <div>
+                  <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>Fin estimado</label>
+                  <input type="date" value={form.estimated_end} onChange={e => setForm(f => ({ ...f, estimated_end: e.target.value }))} style={inputStyle} />
+                </div>
+              </div>
+              <div>
+                <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>Costo total tratamiento ($)</label>
+                <input type="number" value={form.total_cost} onChange={e => setForm(f => ({ ...f, total_cost: e.target.value }))} placeholder="0" style={inputStyle} />
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                <div>
+                  <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>Laboratorios ($)</label>
+                  <input type="number" value={form.lab_cost} onChange={e => setForm(f => ({ ...f, lab_cost: e.target.value }))} placeholder="0" style={inputStyle} />
+                </div>
+                <div>
+                  <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>Reposición brackets ($)</label>
+                  <input type="number" value={form.bracket_cost} onChange={e => setForm(f => ({ ...f, bracket_cost: e.target.value }))} placeholder="0" style={inputStyle} />
+                </div>
+              </div>
+              <div>
+                <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>Monto pagado ($)</label>
+                <input type="number" value={form.paid} onChange={e => setForm(f => ({ ...f, paid: e.target.value }))} placeholder="0" style={inputStyle} />
+              </div>
+              {Number(form.total_cost) > 0 && (() => {
+                const base = Number(form.total_cost) - Number(form.lab_cost || 0) - Number(form.bracket_cost || 0);
+                const profE = Math.round(base * Number(form.professional_pct || 0) / 100);
+                const clinicE = base - profE;
+                return (
+                  <div style={{ background: "#f0fdf4", border: "1px solid #86efac", borderRadius: 10, padding: "12px 14px" }}>
+                    <div style={{ fontWeight: 700, color: COLORS.success, marginBottom: 8, fontSize: 12 }}>Vista previa distribución</div>
+                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, marginBottom: 4 }}>
+                      <span style={{ color: COLORS.textMuted }}>Base neta (sin lab. ni brackets)</span><span style={{ fontWeight: 700 }}>{formatCLP(base)}</span>
+                    </div>
+                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, marginBottom: 4 }}>
+                      <span style={{ color: "#7c3aed" }}>Profesional ({form.professional_pct}%)</span><span style={{ fontWeight: 700, color: "#7c3aed" }}>{formatCLP(profE)}</span>
+                    </div>
+                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12 }}>
+                      <span style={{ color: COLORS.success }}>Clínica ({100 - Number(form.professional_pct)}%)</span><span style={{ fontWeight: 700, color: COLORS.success }}>{formatCLP(clinicE)}</span>
+                    </div>
+                  </div>
+                );
+              })()}
+              <div>
+                <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>Estado</label>
+                <select value={form.status} onChange={e => setForm(f => ({ ...f, status: e.target.value }))} style={inputStyle}>
+                  <option value="activo">Activo</option>
+                  <option value="completado">Completado</option>
+                  <option value="abandonado">Abandonado</option>
+                </select>
+              </div>
+              <div>
+                <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>Notas</label>
+                <textarea value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} rows={2} style={{ ...inputStyle, resize: "vertical" }} />
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: 10, marginTop: 20 }}>
+              <button onClick={() => setShowForm(false)} style={{ flex: 1, background: COLORS.bg, border: `1px solid ${COLORS.border}`, borderRadius: 10, padding: "10px", cursor: "pointer", color: COLORS.textMuted }}>Cancelar</button>
+              <button onClick={saveForm} disabled={!form.patientId || !form.professional}
+                style={{ flex: 2, background: !form.patientId || !form.professional ? COLORS.textDim : COLORS.accent, color: "#fff", border: "none", borderRadius: 10, padding: "10px", fontWeight: 700, cursor: "pointer", fontSize: 14 }}>
+                Guardar caso
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════
+// IMPLANTOLOGÍA
+// ═══════════════════════════════════════════════════════
+function ImplantologiaView({ cases, setCases, patients }) {
+  const toImpl = (r) => ({ ...r, patientId: r.patient_id, phases: r.phases || [] });
+  const getPatient = (id) => patients.find(p => p.id === Number(id));
+
+  const IMPLANT_TYPES = ["Implante unitario", "Implante múltiple", "All-on-4", "All-on-6", "Implante cigomático", "Mini-implante", "Implante post-extracción", "Otro"];
+
+  const defaultForm = { patientId: "", professional: "", professional_pct: 40, date: today(), implant_type: "Implante unitario", tooth: "", total_cost: "", lab_cost: "", paid: "", status: "planificado", notes: "" };
+  const [showForm, setShowForm] = useState(false);
+  const [form, setForm] = useState(defaultForm);
+  const [patSearch, setPatSearch] = useState("");
+  const [patSugg, setPatSugg] = useState([]);
+  const [detail, setDetail] = useState(null);
+  const [addPhase, setAddPhase] = useState(false);
+  const [phaseForm, setPhaseForm] = useState({ date: today(), name: "Cirugía de implante", notes: "" });
+  const [payInput, setPayInput] = useState("");
+
+  const PHASE_NAMES = ["Evaluación y planificación", "Cirugía de implante", "Período de oseointegración", "Instalación de cicatrizal", "Toma de impresión", "Instalación de corona", "Control post-operatorio"];
+
+  const handlePatSearch = (val) => {
+    setPatSearch(val); setForm(f => ({ ...f, patientId: "" }));
+    if (!val.trim()) { setPatSugg([]); return; }
+    const q = val.toLowerCase().replace(/\./g, "").replace(/-/g, "");
+    setPatSugg(patients.filter(p => p.name?.toLowerCase().includes(q) || p.rut?.replace(/\./g,"").replace(/-/g,"").toLowerCase().includes(q)).slice(0, 6));
+  };
+
+  const saveForm = async () => {
+    if (!form.patientId || !form.professional) return;
+    const payload = {
+      patient_id: Number(form.patientId), professional: form.professional,
+      professional_pct: Number(form.professional_pct) || 0,
+      date: form.date, implant_type: form.implant_type, tooth: form.tooth,
+      total_cost: Number(form.total_cost) || 0, lab_cost: Number(form.lab_cost) || 0,
+      paid: Number(form.paid) || 0, status: form.status, notes: form.notes, phases: [],
+    };
+    const { data, error } = await supabase.from("implantology").insert([payload]).select().single();
+    if (!error) { setCases(prev => [toImpl(data), ...prev]); setShowForm(false); setForm(defaultForm); setPatSearch(""); }
+    else alert("Error: " + error.message);
+  };
+
+  const addPhaseToCase = async (caseId) => {
+    const c = cases.find(x => x.id === caseId);
+    if (!c) return;
+    const newPhases = [...(c.phases || []), { date: phaseForm.date, name: phaseForm.name, notes: phaseForm.notes }];
+    const { error } = await supabase.from("implantology").update({ phases: newPhases }).eq("id", caseId);
+    if (!error) { setCases(prev => prev.map(x => x.id === caseId ? { ...x, phases: newPhases } : x)); setAddPhase(false); setPhaseForm({ date: today(), name: "Cirugía de implante", notes: "" }); }
+  };
+
+  const deleteCase = async (id) => {
+    if (!window.confirm("¿Eliminar este caso?")) return;
+    await supabase.from("implantology").delete().eq("id", id);
+    setCases(prev => prev.filter(x => x.id !== id)); setDetail(null);
+  };
+
+  const updateStatus = async (id, status) => {
+    await supabase.from("implantology").update({ status }).eq("id", id);
+    setCases(prev => prev.map(x => x.id === id ? { ...x, status } : x));
+  };
+
+  const registerPay = async (c) => {
+    const amount = Number(payInput) || 0;
+    if (!amount) return;
+    const newPaid = Math.min((c.paid || 0) + amount, c.total_cost);
+    await supabase.from("implantology").update({ paid: newPaid }).eq("id", c.id);
+    setCases(prev => prev.map(x => x.id === c.id ? { ...x, paid: newPaid } : x));
+    setPayInput("");
+  };
+
+  const calcEarnings = (c) => {
+    const base = (c.total_cost || 0) - (c.lab_cost || 0);
+    const profEarnings = Math.round(base * (c.professional_pct || 0) / 100);
+    const clinicEarnings = base - profEarnings;
+    const debt = (c.total_cost || 0) - (c.paid || 0);
+    return { base, profEarnings, clinicEarnings, debt };
+  };
+
+  const statusColor = { planificado: COLORS.warning, "en proceso": COLORS.accent, completado: COLORS.success };
+  const statusBg    = { planificado: "#fffbeb", "en proceso": "#eff6ff", completado: "#f0fdf4" };
+  const inputStyle  = { width: "100%", padding: "8px 12px", border: `1px solid ${COLORS.border}`, borderRadius: 8, fontSize: 13, color: COLORS.text, background: COLORS.bg, boxSizing: "border-box" };
+
+  const detailCase = cases.find(c => c.id === detail);
+  const totalCobrado = cases.reduce((s, c) => s + (c.paid || 0), 0);
+  const totalDeuda   = cases.reduce((s, c) => s + Math.max(0, (c.total_cost || 0) - (c.paid || 0)), 0);
+  const totalProfPay = cases.reduce((s, c) => s + calcEarnings(c).profEarnings, 0);
+  const enProceso    = cases.filter(c => c.status === "en proceso").length;
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <div>
+          <h2 style={{ margin: 0, color: COLORS.text, fontSize: 20 }}>⚙️ Implantología</h2>
+          <p style={{ margin: "4px 0 0", color: COLORS.textMuted, fontSize: 13 }}>{cases.length} caso{cases.length !== 1 ? "s" : ""} registrado{cases.length !== 1 ? "s" : ""}</p>
+        </div>
+        <button onClick={() => setShowForm(true)} style={{ background: COLORS.accent, color: "#fff", border: "none", borderRadius: 10, padding: "10px 18px", fontWeight: 700, cursor: "pointer", fontSize: 13 }}>+ Nuevo caso</button>
+      </div>
+
+      {cases.length > 0 && (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 10 }}>
+          {[
+            { label: "En proceso", value: enProceso, icon: "⚡", color: COLORS.accent, bg: "#eff6ff" },
+            { label: "Cobrado", value: formatCLP(totalCobrado), icon: "💰", color: COLORS.success, bg: "#f0fdf4" },
+            { label: "Por cobrar", value: formatCLP(totalDeuda), icon: "💸", color: COLORS.danger, bg: "#fff1f2" },
+            { label: "Pago profesionales", value: formatCLP(totalProfPay), icon: "👨‍⚕️", color: "#7c3aed", bg: "#f5f3ff" },
+          ].map(card => (
+            <div key={card.label} style={{ background: card.bg, borderRadius: 12, padding: "14px 16px" }}>
+              <div style={{ fontSize: 11, color: COLORS.textMuted, marginBottom: 4 }}>{card.icon} {card.label}</div>
+              <div style={{ fontWeight: 800, fontSize: 17, color: card.color }}>{card.value}</div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {cases.length === 0
+        ? <div style={{ textAlign: "center", color: COLORS.textDim, padding: 60, background: COLORS.card, borderRadius: 14, border: `1px solid ${COLORS.border}` }}>
+            <div style={{ fontSize: 40, marginBottom: 8 }}>⚙️</div>
+            <div>No hay casos de implantología registrados</div>
+          </div>
+        : <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            {cases.map(c => {
+              const p = getPatient(c.patientId);
+              const { debt } = calcEarnings(c);
+              return (
+                <div key={c.id} onClick={() => setDetail(c.id)}
+                  style={{ background: COLORS.card, border: `1px solid ${COLORS.border}`, borderRadius: 12, padding: "14px 18px", cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontWeight: 700, fontSize: 15, color: COLORS.text }}>{p?.name || "—"}</div>
+                    <div style={{ fontSize: 12, color: COLORS.textMuted, marginTop: 2 }}>👨‍⚕️ {c.professional} · {c.professional_pct}% · {c.implant_type}{c.tooth ? ` · Pieza ${c.tooth}` : ""}</div>
+                    <div style={{ fontSize: 11, color: COLORS.textDim, marginTop: 2 }}>{formatDate(c.date)} · {(c.phases || []).length} fase{(c.phases || []).length !== 1 ? "s" : ""}</div>
+                  </div>
+                  <div style={{ textAlign: "right", flexShrink: 0 }}>
+                    <div style={{ fontWeight: 700, fontSize: 14, color: COLORS.text }}>{formatCLP(c.total_cost)}</div>
+                    {debt > 0 && <div style={{ fontSize: 12, color: COLORS.danger }}>Debe {formatCLP(debt)}</div>}
+                    <span style={{ background: statusBg[c.status] || COLORS.bg, color: statusColor[c.status] || COLORS.textMuted, borderRadius: 20, padding: "2px 10px", fontSize: 11, fontWeight: 700 }}>{c.status}</span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+      }
+
+      {/* MODAL DETALLE */}
+      {detailCase && (() => {
+        const p = getPatient(detailCase.patientId);
+        const { base, profEarnings, clinicEarnings, debt } = calcEarnings(detailCase);
+        return (
+          <div style={{ position: "fixed", inset: 0, background: "#00000088", zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+            <div style={{ background: COLORS.surface, borderRadius: 18, padding: 28, width: "100%", maxWidth: 560, maxHeight: "90vh", overflowY: "auto", display: "flex", flexDirection: "column", gap: 18 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <h3 style={{ margin: 0, color: COLORS.text }}>⚙️ Caso Implantología</h3>
+                <button onClick={() => { setDetail(null); setPayInput(""); }} style={{ background: "none", border: "none", fontSize: 24, cursor: "pointer", color: COLORS.textMuted }}>×</button>
+              </div>
+
+              <div style={{ background: COLORS.accent + "15", borderRadius: 10, padding: "12px 16px" }}>
+                <div style={{ fontWeight: 700, color: COLORS.text, fontSize: 15 }}>{p?.name}</div>
+                <div style={{ color: COLORS.textMuted, fontSize: 13 }}>👨‍⚕️ {detailCase.professional} · {detailCase.professional_pct}% comisión</div>
+                <div style={{ color: COLORS.textDim, fontSize: 12, marginTop: 2 }}>{detailCase.implant_type}{detailCase.tooth ? ` · Pieza ${detailCase.tooth}` : ""} · {formatDate(detailCase.date)}</div>
+                <div style={{ marginTop: 6 }}>
+                  <select value={detailCase.status} onChange={e => updateStatus(detailCase.id, e.target.value)}
+                    style={{ fontSize: 12, fontWeight: 700, padding: "3px 10px", borderRadius: 20, border: "none", background: statusBg[detailCase.status] || COLORS.bg, color: statusColor[detailCase.status] || COLORS.textMuted, cursor: "pointer" }}>
+                    <option value="planificado">Planificado</option>
+                    <option value="en proceso">En proceso</option>
+                    <option value="completado">Completado</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Desglose financiero */}
+              <div style={{ background: COLORS.bg, borderRadius: 12, padding: "16px 18px" }}>
+                <div style={{ fontWeight: 700, color: COLORS.text, marginBottom: 10, fontSize: 13 }}>💵 Desglose financiero</div>
+                {[
+                  { label: "Total tratamiento", value: formatCLP(detailCase.total_cost), bold: true },
+                  { label: "Laboratorios (excluido %)", value: `– ${formatCLP(detailCase.lab_cost)}`, color: COLORS.textMuted },
+                  { label: "Base para comisión", value: formatCLP(base), color: COLORS.accent },
+                  { label: `Profesional (${detailCase.professional_pct}%)`, value: formatCLP(profEarnings), color: "#7c3aed" },
+                  { label: `Clínica (${100 - detailCase.professional_pct}%)`, value: formatCLP(clinicEarnings), color: COLORS.success },
+                ].map(row => (
+                  <div key={row.label} style={{ display: "flex", justifyContent: "space-between", fontSize: 13, paddingBottom: 7, marginBottom: 7, borderBottom: `1px solid ${COLORS.border}` }}>
+                    <span style={{ color: COLORS.textMuted }}>{row.label}</span>
+                    <span style={{ fontWeight: row.bold ? 700 : 600, color: row.color || COLORS.text }}>{row.value}</span>
+                  </div>
+                ))}
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 14, marginTop: 4 }}>
+                  <span style={{ color: COLORS.textMuted }}>Pagado</span>
+                  <span style={{ fontWeight: 700, color: COLORS.success }}>{formatCLP(detailCase.paid)}</span>
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 14, marginTop: 4 }}>
+                  <span style={{ color: COLORS.textMuted }}>Por cobrar</span>
+                  <span style={{ fontWeight: 700, color: debt > 0 ? COLORS.danger : COLORS.success }}>{formatCLP(debt)}</span>
+                </div>
+                <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+                  <input type="number" placeholder="Monto a registrar" value={payInput} onChange={e => setPayInput(e.target.value)}
+                    style={{ flex: 1, padding: "7px 10px", border: `1px solid ${COLORS.border}`, borderRadius: 8, fontSize: 13 }} />
+                  <button onClick={() => registerPay(detailCase)}
+                    style={{ background: COLORS.success, color: "#fff", border: "none", borderRadius: 8, padding: "7px 14px", fontWeight: 700, cursor: "pointer", fontSize: 13 }}>
+                    + Pago
+                  </button>
+                </div>
+              </div>
+
+              {/* Fases */}
+              <div>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+                  <div style={{ fontWeight: 700, color: COLORS.text, fontSize: 13 }}>🔬 Fases ({(detailCase.phases || []).length})</div>
+                  <button onClick={() => setAddPhase(true)}
+                    style={{ background: COLORS.accent + "18", color: COLORS.accent, border: `1px solid ${COLORS.accent}44`, borderRadius: 8, padding: "5px 12px", fontSize: 12, cursor: "pointer", fontWeight: 700 }}>
+                    + Agregar fase
+                  </button>
+                </div>
+                {(detailCase.phases || []).length === 0
+                  ? <div style={{ color: COLORS.textDim, fontSize: 13, fontStyle: "italic" }}>Sin fases registradas</div>
+                  : <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                      {[...(detailCase.phases || [])].reverse().map((ph, i) => (
+                        <div key={i} style={{ background: COLORS.bg, borderRadius: 8, padding: "8px 12px" }}>
+                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                            <span style={{ fontWeight: 700, color: COLORS.text, fontSize: 13 }}>{ph.name}</span>
+                            <span style={{ fontWeight: 600, color: COLORS.accent, fontSize: 12 }}>{formatDate(ph.date)}</span>
+                          </div>
+                          {ph.notes && <div style={{ color: COLORS.textMuted, fontSize: 12, marginTop: 3 }}>{ph.notes}</div>}
+                        </div>
+                      ))}
+                    </div>
+                }
+              </div>
+
+              {detailCase.notes && (
+                <div style={{ background: COLORS.bg, borderRadius: 8, padding: "10px 14px", fontSize: 13, color: COLORS.textMuted }}>📝 {detailCase.notes}</div>
+              )}
+
+              <button onClick={() => deleteCase(detailCase.id)}
+                style={{ background: COLORS.danger + "18", color: COLORS.danger, border: `1px solid ${COLORS.danger}44`, borderRadius: 8, padding: "9px", fontWeight: 700, cursor: "pointer", fontSize: 13 }}>
+                🗑 Eliminar caso
+              </button>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* MODAL AGREGAR FASE */}
+      {addPhase && detail && (
+        <div style={{ position: "fixed", inset: 0, background: "#00000088", zIndex: 300, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+          <div style={{ background: COLORS.surface, borderRadius: 16, padding: 24, width: "100%", maxWidth: 420 }}>
+            <h4 style={{ margin: "0 0 16px", color: COLORS.text }}>🔬 Registrar fase</h4>
+            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              <div>
+                <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>Fase</label>
+                <select value={phaseForm.name} onChange={e => setPhaseForm(f => ({ ...f, name: e.target.value }))} style={inputStyle}>
+                  {PHASE_NAMES.map(n => <option key={n} value={n}>{n}</option>)}
+                </select>
+              </div>
+              <div>
+                <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>Fecha</label>
+                <input type="date" value={phaseForm.date} onChange={e => setPhaseForm(f => ({ ...f, date: e.target.value }))} style={inputStyle} />
+              </div>
+              <div>
+                <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>Observaciones</label>
+                <textarea value={phaseForm.notes} onChange={e => setPhaseForm(f => ({ ...f, notes: e.target.value }))} rows={3}
+                  placeholder="Detalles de la fase..." style={{ ...inputStyle, resize: "vertical" }} />
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
+              <button onClick={() => setAddPhase(false)} style={{ flex: 1, background: COLORS.bg, border: `1px solid ${COLORS.border}`, borderRadius: 8, padding: "9px", cursor: "pointer", color: COLORS.textMuted }}>Cancelar</button>
+              <button onClick={() => addPhaseToCase(detail)} style={{ flex: 1, background: COLORS.accent, color: "#fff", border: "none", borderRadius: 8, padding: "9px", cursor: "pointer", fontWeight: 700 }}>Guardar</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL NUEVO CASO */}
+      {showForm && (
+        <div style={{ position: "fixed", inset: 0, background: "#00000088", zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+          <div style={{ background: COLORS.surface, borderRadius: 18, padding: 28, width: "100%", maxWidth: 520, maxHeight: "90vh", overflowY: "auto" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+              <h3 style={{ margin: 0, color: COLORS.text }}>⚙️ Nuevo caso implantología</h3>
+              <button onClick={() => setShowForm(false)} style={{ background: "none", border: "none", fontSize: 22, cursor: "pointer", color: COLORS.textMuted }}>×</button>
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+              <div style={{ position: "relative" }}>
+                <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>Paciente *</label>
+                <input value={patSearch} onChange={e => handlePatSearch(e.target.value)} placeholder="Buscar paciente..." style={inputStyle} />
+                {patSugg.length > 0 && (
+                  <div style={{ position: "absolute", top: "100%", left: 0, right: 0, background: COLORS.card, border: `1px solid ${COLORS.border}`, borderRadius: 10, zIndex: 300, boxShadow: "0 8px 24px rgba(0,0,0,0.12)", marginTop: 4 }}>
+                    {patSugg.map(p => (
+                      <div key={p.id} onClick={() => { setPatSearch(p.name); setForm(f => ({ ...f, patientId: String(p.id) })); setPatSugg([]); }}
+                        style={{ padding: "10px 14px", cursor: "pointer", display: "flex", justifyContent: "space-between", borderBottom: `1px solid ${COLORS.border}` }}
+                        onMouseEnter={e => e.currentTarget.style.background = COLORS.bg}
+                        onMouseLeave={e => e.currentTarget.style.background = ""}>
+                        <span style={{ fontWeight: 600 }}>{p.name}</span>
+                        {p.rut && <span style={{ color: COLORS.textMuted, fontSize: 12 }}>{p.rut}</span>}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <div>
+                <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>Profesional *</label>
+                <input value={form.professional} onChange={e => setForm(f => ({ ...f, professional: e.target.value }))} placeholder="Nombre del implantólogo" style={inputStyle} />
+              </div>
+              <div>
+                <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>% Comisión profesional</label>
+                <input type="number" value={form.professional_pct} min={0} max={100} onChange={e => setForm(f => ({ ...f, professional_pct: e.target.value }))} style={inputStyle} />
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                <div>
+                  <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>Tipo de implante</label>
+                  <select value={form.implant_type} onChange={e => setForm(f => ({ ...f, implant_type: e.target.value }))} style={inputStyle}>
+                    {IMPLANT_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>Pieza dental</label>
+                  <input value={form.tooth} onChange={e => setForm(f => ({ ...f, tooth: e.target.value }))} placeholder="Ej: 16" style={inputStyle} />
+                </div>
+              </div>
+              <div>
+                <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>Fecha</label>
+                <input type="date" value={form.date} onChange={e => setForm(f => ({ ...f, date: e.target.value }))} style={inputStyle} />
+              </div>
+              <div>
+                <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>Costo total ($)</label>
+                <input type="number" value={form.total_cost} onChange={e => setForm(f => ({ ...f, total_cost: e.target.value }))} placeholder="0" style={inputStyle} />
+              </div>
+              <div>
+                <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>Laboratorios ($) — excluido de comisión</label>
+                <input type="number" value={form.lab_cost} onChange={e => setForm(f => ({ ...f, lab_cost: e.target.value }))} placeholder="0" style={inputStyle} />
+              </div>
+              <div>
+                <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>Monto pagado ($)</label>
+                <input type="number" value={form.paid} onChange={e => setForm(f => ({ ...f, paid: e.target.value }))} placeholder="0" style={inputStyle} />
+              </div>
+              {Number(form.total_cost) > 0 && (() => {
+                const base = Number(form.total_cost) - Number(form.lab_cost || 0);
+                const profE = Math.round(base * Number(form.professional_pct || 0) / 100);
+                const clinicE = base - profE;
+                return (
+                  <div style={{ background: "#f0fdf4", border: "1px solid #86efac", borderRadius: 10, padding: "12px 14px" }}>
+                    <div style={{ fontWeight: 700, color: COLORS.success, marginBottom: 8, fontSize: 12 }}>Vista previa distribución</div>
+                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, marginBottom: 4 }}>
+                      <span style={{ color: COLORS.textMuted }}>Base neta (sin laboratorio)</span><span style={{ fontWeight: 700 }}>{formatCLP(base)}</span>
+                    </div>
+                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, marginBottom: 4 }}>
+                      <span style={{ color: "#7c3aed" }}>Profesional ({form.professional_pct}%)</span><span style={{ fontWeight: 700, color: "#7c3aed" }}>{formatCLP(profE)}</span>
+                    </div>
+                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12 }}>
+                      <span style={{ color: COLORS.success }}>Clínica ({100 - Number(form.professional_pct)}%)</span><span style={{ fontWeight: 700, color: COLORS.success }}>{formatCLP(clinicE)}</span>
+                    </div>
+                  </div>
+                );
+              })()}
+              <div>
+                <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>Estado</label>
+                <select value={form.status} onChange={e => setForm(f => ({ ...f, status: e.target.value }))} style={inputStyle}>
+                  <option value="planificado">Planificado</option>
+                  <option value="en proceso">En proceso</option>
+                  <option value="completado">Completado</option>
+                </select>
+              </div>
+              <div>
+                <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>Notas</label>
+                <textarea value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} rows={2} style={{ ...inputStyle, resize: "vertical" }} />
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: 10, marginTop: 20 }}>
+              <button onClick={() => setShowForm(false)} style={{ flex: 1, background: COLORS.bg, border: `1px solid ${COLORS.border}`, borderRadius: 10, padding: "10px", cursor: "pointer", color: COLORS.textMuted }}>Cancelar</button>
+              <button onClick={saveForm} disabled={!form.patientId || !form.professional}
+                style={{ flex: 2, background: !form.patientId || !form.professional ? COLORS.textDim : COLORS.accent, color: "#fff", border: "none", borderRadius: 10, padding: "10px", fontWeight: 700, cursor: "pointer", fontSize: 14 }}>
+                Guardar caso
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Porcentaje fijo de endodoncia para colega externo
+const ENDO_COLEGA_PCT = 60;
+
+// Calcula el pago total adeudado a profesionales (basado en lo cobrado)
+function calcColegasPagos(treatments, orthodonticsCases, implantologyCases) {
+  // Endodoncia: 60% de lo pagado
+  const endoPago = treatments
+    .filter(t => t.procedure === "Endodoncia")
+    .reduce((s, t) => s + Math.round((t.paid || 0) * ENDO_COLEGA_PCT / 100), 0);
+
+  // Ortodoncia: pct% de la base (total - lab - brackets) × proporción cobrada
+  const orthoPago = orthodonticsCases.reduce((s, c) => {
+    const base = (c.total_cost || 0) - (c.lab_cost || 0) - (c.bracket_cost || 0);
+    const profTotal = Math.round(base * (c.professional_pct || 0) / 100);
+    const ratio = c.total_cost > 0 ? Math.min((c.paid || 0) / c.total_cost, 1) : 0;
+    return s + Math.round(profTotal * ratio);
+  }, 0);
+
+  // Implantología: pct% de la base (total - lab) × proporción cobrada
+  const implPago = implantologyCases.reduce((s, c) => {
+    const base = (c.total_cost || 0) - (c.lab_cost || 0);
+    const profTotal = Math.round(base * (c.professional_pct || 0) / 100);
+    const ratio = c.total_cost > 0 ? Math.min((c.paid || 0) / c.total_cost, 1) : 0;
+    return s + Math.round(profTotal * ratio);
+  }, 0);
+
+  return { endoPago, orthoPago, implPago, total: endoPago + orthoPago + implPago };
+}
+
+function DashboardView({ appointments, treatments, patients, orthodonticsCases, implantologyCases, setView, setAgendaConfig }) {
   const todayAppts = appointments.filter(a => a.date === today());
   const pending = appointments.filter(a => a.status === "pendiente").length;
   const confirmed = appointments.filter(a => a.status === "confirmada").length;
   const totalDebt = treatments.filter(t => t.status === "completado" || t.status === "pendiente pago").reduce((s, t) => s + (t.cost - t.paid), 0);
   const thisMonth = new Date().toISOString().slice(0, 7);
   const monthRevenue = treatments.filter(t => t.date.startsWith(thisMonth)).reduce((s, t) => s + t.paid, 0);
+
+  const mTreat = treatments.filter(t => t.date.startsWith(thisMonth));
+  const mOrtho = orthodonticsCases.filter(c => (c.start_date || "").startsWith(thisMonth));
+  const mImpl  = implantologyCases.filter(c => (c.date || "").startsWith(thisMonth));
+  const { endoPago, orthoPago, implPago, total: totalColegasPago } = calcColegasPagos(mTreat, mOrtho, mImpl);
+  const netClinica = monthRevenue - endoPago - orthoPago - implPago;
 
   const goAgenda = (filter = "", date = today()) => {
     setAgendaConfig({ filter, date });
@@ -1937,6 +2793,8 @@ function DashboardView({ appointments, treatments, patients, setView, setAgendaC
           { label: "Pendientes", value: pending, color: COLORS.warning, bg: "#fffbeb", icon: "⏳", action: () => goAgenda("pendiente") },
           { label: "Pacientes", value: patients.length, color: "#7c3aed", bg: "#f5f3ff", icon: "👥", action: () => setView("patients") },
           { label: "Ingreso mes", value: formatCLP(monthRevenue), color: COLORS.success, bg: "#f0fdf4", icon: "💰", small: true, action: () => setView("treatments") },
+          { label: "Pago colegas", value: formatCLP(totalColegasPago), color: "#7c3aed", bg: "#f5f3ff", icon: "👨‍⚕️", small: true, action: () => setView("performance") },
+          { label: "Neto clínica", value: formatCLP(netClinica), color: COLORS.accent, bg: "#eff6ff", icon: "🏥", small: true, action: () => setView("performance") },
           { label: "Por cobrar", value: formatCLP(totalDebt), color: COLORS.danger, bg: "#fff1f2", icon: "💸", small: true, action: () => setView("treatments") },
         ].map(card => (
           <div key={card.label} onClick={card.action}
@@ -3548,6 +4406,8 @@ export default function App() {
   const [treatments, setTreatments] = useState([]);
   const [budgets, setBudgets] = useState([]);
   const [aestheticCases, setAestheticCases] = useState([]);
+  const [orthodonticsCases, setOrthodonticsCases] = useState([]);
+  const [implantologyCases, setImplantologyCases] = useState([]);
   const [selectedPatient, setSelectedPatient] = useState(null);
   const [loading, setLoading] = useState(true);
   const [session, setSession] = useState(null);
@@ -3584,19 +4444,23 @@ export default function App() {
       supabase.from("treatments").select("*").order("date", { ascending: false }),
       supabase.from("budgets").select("*").order("id", { ascending: false }).then(r => r).catch(() => ({ data: [] })),
       supabase.from("aesthetic_cases").select("*").order("id", { ascending: false }).then(r => r).catch(() => ({ data: [] })),
-    ]).then(([p, a, t, b, ac]) => {
+      supabase.from("orthodontics").select("*").order("id", { ascending: false }).then(r => r).catch(() => ({ data: [] })),
+      supabase.from("implantology").select("*").order("id", { ascending: false }).then(r => r).catch(() => ({ data: [] })),
+    ]).then(([p, a, t, b, ac, orth, impl]) => {
       setPatients(p.data || []);
       setAppointments((a.data || []).map(toAppt));
       setTreatments((t.data || []).map(toTreat));
       setBudgets(((b && b.data) || []).map(toBudget));
       setAestheticCases(((ac && ac.data) || []).map(toAesthetic));
+      setOrthodonticsCases(((orth && orth.data) || []).map(r => ({ ...r, patientId: r.patient_id, controls: r.controls || [] })));
+      setImplantologyCases(((impl && impl.data) || []).map(r => ({ ...r, patientId: r.patient_id, phases: r.phases || [] })));
       setLoading(false);
     });
   };
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
-    setPatients([]); setAppointments([]); setTreatments([]); setBudgets([]); setAestheticCases([]);
+    setPatients([]); setAppointments([]); setTreatments([]); setBudgets([]); setAestheticCases([]); setOrthodonticsCases([]); setImplantologyCases([]);
   };
 
   // ── Google Calendar ────────────────────────────────────────────────
@@ -3699,13 +4563,15 @@ export default function App() {
   };
 
   const navItems = [
-    { id: "dashboard",    label: "Inicio",           icon: "⊞" },
-    { id: "agenda",       label: "Agenda",            icon: "📅" },
-    { id: "patients",     label: "Pacientes",         icon: "👥" },
-    { id: "treatments",   label: "Historial Clínico", icon: "🦷" },
-    { id: "budgets",      label: "Presupuestos",      icon: "📋" },
-    { id: "aesthetic",    label: "Estética Dental",   icon: "✨" },
-    { id: "performance",  label: "Rendimiento",       icon: "📊" },
+    { id: "dashboard",      label: "Inicio",           icon: "⊞" },
+    { id: "agenda",         label: "Agenda",            icon: "📅" },
+    { id: "patients",       label: "Pacientes",         icon: "👥" },
+    { id: "treatments",     label: "Historial Clínico", icon: "🦷" },
+    { id: "budgets",        label: "Presupuestos",      icon: "📋" },
+    { id: "aesthetic",      label: "Estética Dental",   icon: "✨" },
+    { id: "orthodontics",   label: "Ortodoncia",        icon: "🦷" },
+    { id: "implantology",   label: "Implantología",     icon: "⚙️" },
+    { id: "performance",    label: "Rendimiento",       icon: "📊" },
   ];
 
   if (loading) return (
@@ -3809,13 +4675,15 @@ export default function App() {
 
         {/* Vistas */}
         <div style={{ padding: "28px 28px", flex: 1, maxWidth: 900, width: "100%" }}>
-          {view === "dashboard"   && <DashboardView appointments={appointments} treatments={treatments} patients={patients} setView={setView} setAgendaConfig={setAgendaConfig} />}
+          {view === "dashboard"   && <DashboardView appointments={appointments} treatments={treatments} patients={patients} orthodonticsCases={orthodonticsCases} implantologyCases={implantologyCases} setView={setView} setAgendaConfig={setAgendaConfig} />}
           {view === "agenda"      && <AgendaView key={agendaConfig.date + agendaConfig.filter} appointments={appointments} patients={patients} setAppointments={setAppointments} setView={setView} setSelectedPatient={setSelectedPatient} initialDate={agendaConfig.date} initialFilter={agendaConfig.filter} syncGCal={syncGCal} gcalConnected={gcalConnected} connectGCal={connectGCal} />}
           {view === "patients"    && <PatientsView patients={patients} setPatients={setPatients} appointments={appointments} treatments={treatments} setTreatments={setTreatments} selectedPatient={selectedPatient} setSelectedPatient={setSelectedPatient} />}
           {view === "treatments"  && <TreatmentsView treatments={treatments} setTreatments={setTreatments} patients={patients} />}
           {view === "budgets"     && <BudgetView budgets={budgets} setBudgets={setBudgets} patients={patients} treatments={treatments} setTreatments={setTreatments} />}
-          {view === "aesthetic"   && <AestheticView aestheticCases={aestheticCases} setAestheticCases={setAestheticCases} patients={patients} />}
-          {view === "performance" && <PerformanceView appointments={appointments} treatments={treatments} patients={patients} />}
+          {view === "aesthetic"    && <AestheticView aestheticCases={aestheticCases} setAestheticCases={setAestheticCases} patients={patients} />}
+          {view === "orthodontics" && <OrtodonciaView cases={orthodonticsCases} setCases={setOrthodonticsCases} patients={patients} />}
+          {view === "implantology" && <ImplantologiaView cases={implantologyCases} setCases={setImplantologyCases} patients={patients} />}
+          {view === "performance"  && <PerformanceView appointments={appointments} treatments={treatments} patients={patients} orthodonticsCases={orthodonticsCases} implantologyCases={implantologyCases} />}
         </div>
       </main>
 
