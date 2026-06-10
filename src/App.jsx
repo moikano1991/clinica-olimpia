@@ -52,6 +52,7 @@ const treatmentCatalog = [
   "Prótesis removible",
   "Implante",
   "Ortodoncia consulta",
+  "Reconstrucción de Resina",
 ];
 
 const formatCLP = (n) => "$ " + Math.round(n || 0).toLocaleString("es-CL");
@@ -4350,7 +4351,8 @@ function BudgetView({ budgets, setBudgets, patients, treatments, setTreatments }
 
   // Add line item
   const addItem = () => {
-    if (!newItem.procedure || !newItem.unitPrice) return;
+    if (!newItem.procedure) { alert("Selecciona un procedimiento."); return; }
+    if (!newItem.unitPrice || Number(newItem.unitPrice) <= 0) { alert("Ingresa el precio unitario."); return; }
     setForm(f => ({ ...f, items: [...f.items, { ...newItem, unitPrice: Number(newItem.unitPrice), id: Date.now() }] }));
     setNewItem({ procedure: "Limpieza dental", tooth: "-", quantity: 1, unitPrice: "" });
   };
@@ -4413,7 +4415,8 @@ function BudgetView({ budgets, setBudgets, patients, treatments, setTreatments }
   };
 
   const addEditItem = () => {
-    if (!editNewItem.procedure || !editNewItem.unitPrice) return;
+    if (!editNewItem.procedure) { alert("Selecciona un procedimiento."); return; }
+    if (!editNewItem.unitPrice || Number(editNewItem.unitPrice) <= 0) { alert("Ingresa el precio unitario."); return; }
     setEditForm(f => ({ ...f, items: [...f.items, { ...editNewItem, unitPrice: Number(editNewItem.unitPrice), id: Date.now() }] }));
     setEditNewItem({ procedure: "Limpieza dental", tooth: "-", quantity: 1, unitPrice: "" });
   };
@@ -4775,7 +4778,8 @@ function BudgetView({ budgets, setBudgets, patients, treatments, setTreatments }
                   {patSugg.length > 0 && (
                     <div style={{ position: "absolute", top: "100%", left: 0, right: 0, background: COLORS.card, border: `1px solid ${COLORS.border}`, borderRadius: 10, zIndex: 300, boxShadow: "0 8px 24px rgba(0,0,0,0.12)" }}>
                       {patSugg.map(p => (
-                        <div key={p.id} onClick={() => { setPatSearch(p.name); setForm(f => ({ ...f, patientId: String(p.id) })); setPatSugg([]); }}
+                        <div key={p.id}
+                          onMouseDown={e => { e.preventDefault(); setPatSearch(p.name); setForm(f => ({ ...f, patientId: String(p.id) })); setPatSugg([]); }}
                           style={{ padding: "10px 14px", cursor: "pointer", display: "flex", justifyContent: "space-between", borderBottom: `1px solid ${COLORS.border}` }}
                           onMouseEnter={e => e.currentTarget.style.background = COLORS.bg}
                           onMouseLeave={e => e.currentTarget.style.background = ""}>
@@ -4926,7 +4930,8 @@ function BudgetView({ budgets, setBudgets, patients, treatments, setTreatments }
                   {editPatSugg.length > 0 && (
                     <div style={{ position: "absolute", top: "100%", left: 0, right: 0, background: COLORS.card, border: `1px solid ${COLORS.border}`, borderRadius: 10, zIndex: 300, boxShadow: "0 8px 24px rgba(0,0,0,0.12)" }}>
                       {editPatSugg.map(p => (
-                        <div key={p.id} onClick={() => { setEditPatSearch(p.name); setEditForm(f => ({ ...f, patientId: String(p.id) })); setEditPatSugg([]); }}
+                        <div key={p.id}
+                          onMouseDown={e => { e.preventDefault(); setEditPatSearch(p.name); setEditForm(f => ({ ...f, patientId: String(p.id) })); setEditPatSugg([]); }}
                           style={{ padding: "10px 14px", cursor: "pointer", display: "flex", justifyContent: "space-between", borderBottom: `1px solid ${COLORS.border}` }}
                           onMouseEnter={e => e.currentTarget.style.background = COLORS.bg}
                           onMouseLeave={e => e.currentTarget.style.background = ""}>
