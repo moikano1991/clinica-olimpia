@@ -53,6 +53,13 @@ const treatmentCatalog = [
   "Implante",
   "Ortodoncia consulta",
   "Reconstrucción de Resina",
+  "Control",
+  "Ajuste oclusal",
+  "Retiro con contención",
+  "Reparación prótesis",
+  "Provisorio",
+  "Ferulización",
+  "Obturación vidrio ionómero",
 ];
 
 const formatCLP = (n) => "$ " + Math.round(n || 0).toLocaleString("es-CL");
