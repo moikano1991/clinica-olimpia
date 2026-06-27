@@ -52,9 +52,17 @@ const treatmentCatalog = [
   "Prótesis removible",
   "Implante",
   "Ortodoncia consulta",
+  "Reconstrucción de Resina",
+  "Control",
+  "Ajuste oclusal",
+  "Retiro con contención",
+  "Reparación prótesis",
+  "Provisorio",
+  "Ferulización",
+  "Obturación vidrio ionómero",
 ];
 
-const formatCLP = (n) => new Intl.NumberFormat("es-CL", { style: "currency", currency: "CLP" }).format(n);
+const formatCLP = (n) => "$ " + Math.round(n || 0).toLocaleString("es-CL");
 const formatDate = (d) => { if (!d) return ""; const [y, m, day] = d.split("-"); return `${day}/${m}/${y}`; };
 const today = () => new Date().toISOString().split("T")[0];
 
@@ -554,8 +562,8 @@ function PatientsView({ patients, setPatients, appointments, treatments, setTrea
   const [search, setSearch] = useState("");
   const [showForm, setShowForm] = useState(false);
   const [showEditForm, setShowEditForm] = useState(false);
-  const [form, setForm] = useState({ name: "", rut: "", phone: "", email: "", dob: "", address: "", notes: "" });
-  const [editForm, setEditForm] = useState({ name: "", rut: "", phone: "", email: "", dob: "", address: "", notes: "" });
+  const [form, setForm] = useState({ name: "", rut: "", phone: "", email: "", dob: "", address: "", convenio: "", notes: "" });
+  const [editForm, setEditForm] = useState({ name: "", rut: "", phone: "", email: "", dob: "", address: "", convenio: "", notes: "" });
   const [detail, setDetail] = useState(selectedPatient || null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
@@ -577,8 +585,9 @@ function PatientsView({ patients, setPatients, appointments, treatments, setTrea
     const costNum = Number(editTreatDet.cost) || 0;
     const paidNum = Number(editTreatDet.paid) || 0;
     const autoStatus = paidNum >= costNum && costNum > 0 ? "completado" : paidNum > 0 ? "pendiente pago" : editTreatDet.status;
+    const autoDate = (!editTreatDet.date && (autoStatus === "completado" || autoStatus === "pendiente pago")) ? today() : editTreatDet.date;
     const { data, error } = await supabase.from("treatments").update({
-      date: editTreatDet.date, procedure: editTreatDet.procedure, tooth: editTreatDet.tooth || "-",
+      date: autoDate, procedure: editTreatDet.procedure, tooth: editTreatDet.tooth || "-",
       cost: costNum, paid: paidNum, status: autoStatus, notes: editTreatDet.notes,
     }).eq("id", editTreatDet.id).select().single();
     if (!error) { setTreatments(prev => prev.map(t => t.id === editTreatDet.id ? toTreat(data) : t)); setEditTreatDet(null); }
@@ -621,11 +630,11 @@ function PatientsView({ patients, setPatients, appointments, treatments, setTrea
     if (!form.name) return;
     const { data, error } = await supabase.from("patients").insert([{
       name: form.name, rut: form.rut, phone: form.phone, email: form.email,
-      dob: form.dob, address: form.address, notes: form.notes,
+      dob: form.dob, address: form.address, convenio: form.convenio || "", notes: form.notes,
     }]).select().single();
     if (!error) {
       setPatients(prev => [...prev, data]);
-      setForm({ name: "", rut: "", phone: "", email: "", dob: "", address: "", notes: "" });
+      setForm({ name: "", rut: "", phone: "", email: "", dob: "", address: "", convenio: "", notes: "" });
       setShowForm(false);
     }
   };
@@ -718,7 +727,7 @@ function PatientsView({ patients, setPatients, appointments, treatments, setTrea
     if (!editForm.name) return;
     const { data, error } = await supabase.from("patients").update({
       name: editForm.name, rut: editForm.rut, phone: editForm.phone, email: editForm.email,
-      dob: editForm.dob, address: editForm.address, notes: editForm.notes,
+      dob: editForm.dob, address: editForm.address, convenio: editForm.convenio || "", notes: editForm.notes,
     }).eq("id", id).select().single();
     if (!error) {
       setPatients(prev => prev.map(p => p.id === id ? data : p));
@@ -731,8 +740,9 @@ function PatientsView({ patients, setPatients, appointments, treatments, setTrea
     const costNum = Number(treatForm.cost) || 0;
     const paidNum = Number(treatForm.paid) || 0;
     const autoStatus = paidNum >= costNum && costNum > 0 ? "completado" : paidNum > 0 ? "pendiente pago" : treatForm.status;
+    const autoDate = (!treatForm.date && (autoStatus === "completado" || autoStatus === "pendiente pago")) ? today() : (treatForm.date || today());
     const { data, error } = await supabase.from("treatments").insert([{
-      patient_id: patientId, date: treatForm.date, procedure: treatForm.procedure,
+      patient_id: patientId, date: autoDate, procedure: treatForm.procedure,
       tooth: treatForm.tooth || "-", cost: costNum, paid: paidNum,
       status: autoStatus, notes: treatForm.notes,
     }]).select().single();
@@ -747,7 +757,12 @@ function PatientsView({ patients, setPatients, appointments, treatments, setTrea
     const p = patients.find(pt => pt.id === detail);
     if (!p) { setDetail(null); setSelectedPatient(null); return null; }
     const pAppts = appointments.filter(a => a.patientId === p.id).sort((a, b) => b.date.localeCompare(a.date));
-    const pTreat = treatments.filter(t => t.patientId === p.id).sort((a, b) => b.date.localeCompare(a.date));
+    const statusOrder = { "pendiente pago": 0, planificado: 1, completado: 2 };
+    const pTreat = treatments.filter(t => t.patientId === p.id).sort((a, b) => {
+      const so = (statusOrder[a.status] ?? 1) - (statusOrder[b.status] ?? 1);
+      if (so !== 0) return so;
+      return (b.date || "").localeCompare(a.date || "");
+    });
     const totalDebt = pTreat.filter(t => t.status === "completado" || t.status === "pendiente pago").reduce((s, t) => s + (t.cost - t.paid), 0);
 
     const fields = [
@@ -757,6 +772,7 @@ function PatientsView({ patients, setPatients, appointments, treatments, setTrea
       { label: "Email", key: "email", type: "email" },
       { label: "Fecha de nacimiento", key: "dob", type: "date" },
       { label: "Dirección", key: "address", type: "text" },
+      { label: "Convenio", key: "convenio", type: "text" },
       { label: "Alertas / Alergias", key: "notes", type: "text" },
     ];
 
@@ -773,6 +789,7 @@ function PatientsView({ patients, setPatients, appointments, treatments, setTrea
                 <span>✉️ {p.email}</span>
                 <span>🎂 {formatDate(p.dob)}</span>
                 <span>📍 {p.address}</span>
+                {p.convenio && <span>🏥 Convenio: <strong>{p.convenio}</strong></span>}
               </div>
               {p.notes && <div style={{ marginTop: 10, background: COLORS.warning + "11", border: `1px solid ${COLORS.warning}33`, borderRadius: 8, padding: "8px 12px", color: COLORS.warning, fontSize: 13 }}>⚠️ {p.notes}</div>}
             </div>
@@ -781,7 +798,7 @@ function PatientsView({ patients, setPatients, appointments, treatments, setTrea
                 <div style={{ color: COLORS.textMuted, fontSize: 12 }}>Saldo pendiente</div>
                 <div style={{ color: totalDebt > 0 ? COLORS.danger : COLORS.success, fontWeight: 700, fontSize: 24 }}>{formatCLP(totalDebt)}</div>
               </div>
-              <button onClick={() => { setEditForm({ name: p.name, rut: p.rut || "", phone: p.phone || "", email: p.email || "", dob: p.dob || "", address: p.address || "", notes: p.notes || "" }); setShowEditForm(true); }}
+              <button onClick={() => { setEditForm({ name: p.name, rut: p.rut || "", phone: p.phone || "", email: p.email || "", dob: p.dob || "", address: p.address || "", convenio: p.convenio || "", notes: p.notes || "" }); setShowEditForm(true); }}
                 style={{ background: COLORS.accent + "22", color: COLORS.accent, border: `1px solid ${COLORS.accent}44`, borderRadius: 8, padding: "6px 14px", fontSize: 13, cursor: "pointer", fontWeight: 600 }}>
                 ✏️ Editar
               </button>
@@ -899,11 +916,20 @@ function PatientsView({ patients, setPatients, appointments, treatments, setTrea
         </div>
         {pTreat.length === 0 ? <div style={{ color: COLORS.textDim }}>Sin tratamientos registrados</div> : (
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            {pTreat.map(t => (
-              <div key={t.id} style={{ background: COLORS.card, border: `1px solid ${COLORS.border}`, borderRadius: 10, padding: "12px 16px" }}>
+            {pTreat.map(t => {
+              const cardStyle = t.status === "completado"
+                ? { background: "#f0fdf4", border: "1.5px solid #86efac" }
+                : t.status === "pendiente pago"
+                ? { background: "#fefce8", border: "1.5px solid #fde047" }
+                : { background: COLORS.card, border: `1px solid ${COLORS.border}` };
+              return (
+              <div key={t.id} style={{ ...cardStyle, borderRadius: 10, padding: "12px 16px" }}>
                 <div style={{ display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 8, marginBottom: 8 }}>
                   <div>
-                    <div style={{ color: COLORS.text, fontWeight: 600 }}>{formatDate(t.date)} — {t.procedure}</div>
+                    <div style={{ color: COLORS.text, fontWeight: 600 }}>
+                      {t.date ? formatDate(t.date) : <span style={{ color: COLORS.textDim, fontStyle: "italic" }}>Sin fecha</span>}
+                      {" — "}{t.procedure}
+                    </div>
                     {t.tooth && t.tooth !== "-" && <div style={{ color: COLORS.textMuted, fontSize: 12 }}>🦷 FDI {t.tooth}</div>}
                     {t.notes && <div style={{ color: COLORS.textDim, fontSize: 12 }}>{t.notes}</div>}
                   </div>
@@ -924,7 +950,8 @@ function PatientsView({ patients, setPatients, appointments, treatments, setTrea
                   </button>
                 </div>
               </div>
-            ))}
+              );
+            })}
           </div>
         )}
 
@@ -1179,6 +1206,7 @@ function PatientsView({ patients, setPatients, appointments, treatments, setTrea
                 { label: "Email", key: "email", type: "email" },
                 { label: "Fecha de nacimiento", key: "dob", type: "date" },
                 { label: "Dirección", key: "address", type: "text" },
+                { label: "Convenio", key: "convenio", type: "text" },
                 { label: "Alertas / Alergias", key: "notes", type: "text" },
               ].map(f => (
                 <div key={f.key}>
@@ -1189,7 +1217,7 @@ function PatientsView({ patients, setPatients, appointments, treatments, setTrea
             </div>
             <div style={{ display: "flex", gap: 10, marginTop: 20 }}>
               <button onClick={savePatient} style={{ flex: 1, background: COLORS.accent, color: "#fff", border: "none", borderRadius: 8, padding: "10px", fontWeight: 700, cursor: "pointer" }}>Guardar</button>
-              <button onClick={() => { setShowForm(false); setForm({ name: "", rut: "", phone: "", email: "", dob: "", address: "", notes: "" }); }} style={{ flex: 1, background: COLORS.card, color: COLORS.textMuted, border: `1px solid ${COLORS.border}`, borderRadius: 8, padding: "10px", cursor: "pointer" }}>Cancelar</button>
+              <button onClick={() => { setShowForm(false); setForm({ name: "", rut: "", phone: "", email: "", dob: "", address: "", convenio: "", notes: "" }); }} style={{ flex: 1, background: COLORS.card, color: COLORS.textMuted, border: `1px solid ${COLORS.border}`, borderRadius: 8, padding: "10px", cursor: "pointer" }}>Cancelar</button>
             </div>
           </div>
         </div>
@@ -1200,19 +1228,31 @@ function PatientsView({ patients, setPatients, appointments, treatments, setTrea
 
 // ── Selector FDI / ISO 3950 ──────────────────────────────────────────
 function ToothSelector({ value, onChange }) {
-  // Cuadrantes FDI: 1=Sup.Der, 2=Sup.Izq, 3=Inf.Izq, 4=Inf.Der
-  // Fila superior: Q1 (18→11) | Q2 (21→28)
-  // Fila inferior: Q4 (48→41) | Q3 (31→38)
+  const [showTemp, setShowTemp] = useState(false);
+
+  // Permanentes — Q1–Q4
   const upperLeft  = [18,17,16,15,14,13,12,11];
   const upperRight = [21,22,23,24,25,26,27,28];
   const lowerLeft  = [48,47,46,45,44,43,42,41];
   const lowerRight = [31,32,33,34,35,36,37,38];
 
+  // Temporales (deciduos) — Q5–Q8
+  const tempUpperLeft  = [55,54,53,52,51];
+  const tempUpperRight = [61,62,63,64,65];
+  const tempLowerLeft  = [85,84,83,82,81];
+  const tempLowerRight = [71,72,73,74,75];
+
   const toothName = {
+    // Permanentes
     11:"Inc.C",12:"Inc.L",13:"Can",14:"Pre1",15:"Pre2",16:"Mol1",17:"Mol2",18:"Mol3",
     21:"Inc.C",22:"Inc.L",23:"Can",24:"Pre1",25:"Pre2",26:"Mol1",27:"Mol2",28:"Mol3",
     31:"Inc.C",32:"Inc.L",33:"Can",34:"Pre1",35:"Pre2",36:"Mol1",37:"Mol2",38:"Mol3",
     41:"Inc.C",42:"Inc.L",43:"Can",44:"Pre1",45:"Pre2",46:"Mol1",47:"Mol2",48:"Mol3",
+    // Temporales
+    51:"Inc.C",52:"Inc.L",53:"Can",54:"Mol1",55:"Mol2",
+    61:"Inc.C",62:"Inc.L",63:"Can",64:"Mol1",65:"Mol2",
+    71:"Inc.C",72:"Inc.L",73:"Can",74:"Mol1",75:"Mol2",
+    81:"Inc.C",82:"Inc.L",83:"Can",84:"Mol1",85:"Mol2",
   };
 
   const selected = value && value !== "-" ? value.split(",").map(v => v.trim()).filter(Boolean) : [];
@@ -1223,37 +1263,62 @@ function ToothSelector({ value, onChange }) {
     onChange(next.length ? next.join(",") : "-");
   };
 
-  const Btn = ({ t }) => {
+  const Btn = ({ t, temp }) => {
     const on = selected.includes(String(t));
     return (
       <button type="button" title={`${t} — ${toothName[t]}`} onClick={() => toggle(t)}
-        style={{ width: 26, height: 26, borderRadius: 4, padding: 0, fontSize: 9, fontWeight: 700, cursor: "pointer",
-          border: on ? `2px solid ${COLORS.accent}` : `1px solid ${COLORS.border}`,
-          background: on ? COLORS.accent : COLORS.surface,
+        style={{ width: temp ? 28 : 26, height: temp ? 28 : 26, borderRadius: 4, padding: 0,
+          fontSize: 9, fontWeight: 700, cursor: "pointer",
+          border: on ? `2px solid ${temp ? "#d97706" : COLORS.accent}` : `1px solid ${COLORS.border}`,
+          background: on ? (temp ? "#d97706" : COLORS.accent) : COLORS.surface,
           color: on ? "#fff" : COLORS.text, transition: "all 0.1s" }}>
         {t}
       </button>
     );
   };
 
-  const Row = ({ left, right }) => (
+  const Row = ({ left, right, temp }) => (
     <div style={{ display: "flex", justifyContent: "center", gap: 2 }}>
-      {left.map(t => <Btn key={t} t={t} />)}
+      {left.map(t => <Btn key={t} t={t} temp={temp} />)}
       <div style={{ width: 6, borderLeft: `1px dashed ${COLORS.border}` }} />
-      {right.map(t => <Btn key={t} t={t} />)}
+      {right.map(t => <Btn key={t} t={t} temp={temp} />)}
     </div>
   );
 
   return (
     <div style={{ background: COLORS.bg, border: `1px solid ${COLORS.border}`, borderRadius: 10, padding: "12px 10px" }}>
+      {/* Dientes permanentes */}
       <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: COLORS.textDim, marginBottom: 6, padding: "0 2px" }}>
         <span>D — Derecha px</span>
-        <span style={{ color: COLORS.textMuted, fontWeight: 700, fontSize: 9 }}>FDI / ISO 3950</span>
+        <span style={{ color: COLORS.textMuted, fontWeight: 700, fontSize: 9 }}>FDI / ISO 3950 — Permanentes</span>
         <span>Izquierda px — I</span>
       </div>
       <Row left={upperLeft} right={upperRight} />
       <div style={{ height: 6, borderBottom: `1px dashed ${COLORS.border}`, margin: "3px 0" }} />
       <Row left={lowerLeft} right={lowerRight} />
+
+      {/* Toggle dientes temporales */}
+      <button type="button" onClick={() => setShowTemp(s => !s)}
+        style={{ marginTop: 10, width: "100%", background: showTemp ? "#fef3c7" : COLORS.surface,
+          border: `1px dashed #d97706`, borderRadius: 6, padding: "5px 10px",
+          fontSize: 11, fontWeight: 700, color: "#92400e", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
+        🦷 {showTemp ? "▲ Ocultar" : "▼ Mostrar"} dientes temporales (deciduos)
+      </button>
+
+      {/* Dientes temporales — Q5–Q8 */}
+      {showTemp && (
+        <div style={{ marginTop: 8, background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 8, padding: "10px 8px" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: "#92400e", marginBottom: 6 }}>
+            <span>D — Derecha px</span>
+            <span style={{ fontWeight: 700 }}>Temporales / Deciduos</span>
+            <span>Izquierda px — I</span>
+          </div>
+          <Row left={tempUpperLeft} right={tempUpperRight} temp />
+          <div style={{ height: 6, borderBottom: `1px dashed #fde68a`, margin: "3px 0" }} />
+          <Row left={tempLowerLeft} right={tempLowerRight} temp />
+        </div>
+      )}
+
       {selected.length > 0 ? (
         <div style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
           <span style={{ color: COLORS.accent, fontSize: 13, fontWeight: 700 }}>
@@ -1696,11 +1761,11 @@ function PerformanceView({ appointments, treatments, patients, orthodonticsCases
 
   // KPIs principales
   const revenue   = mT.reduce((s, t) => s + (t.paid || 0), 0);
-  const billed    = mT.reduce((s, t) => s + (t.cost || 0), 0);
+  const billed    = mT.filter(t => t.status !== "planificado").reduce((s, t) => s + (t.cost || 0), 0);
   const debt      = mT.filter(t => t.status === "completado" || t.status === "pendiente pago").reduce((s, t) => s + ((t.cost || 0) - (t.paid || 0)), 0);
   const collRate  = billed > 0 ? Math.round(revenue / billed * 100) : 0;
   const prevRev   = pmT.reduce((s, t) => s + (t.paid || 0), 0);
-  const prevBill  = pmT.reduce((s, t) => s + (t.cost || 0), 0);
+  const prevBill  = pmT.filter(t => t.status !== "planificado").reduce((s, t) => s + (t.cost || 0), 0);
 
   // Pago a colegas del mes
   const mOrtho = (orthodonticsCases || []).filter(c => (c.start_date || "").startsWith(month));
@@ -2010,6 +2075,7 @@ function EndodonciaView({ cases, setCases, patients }) {
   const [addSession, setAddSession] = useState(false);
   const [sessionForm, setSessionForm] = useState({ date: today(), notes: "" });
   const [payInput, setPayInput]   = useState("");
+  const [editCase, setEditCase]   = useState(null);
 
   const handlePatSearch = (val) => {
     setPatSearch(val); setForm(f => ({ ...f, patientId: "" }));
@@ -2044,6 +2110,20 @@ function EndodonciaView({ cases, setCases, patients }) {
     if (!window.confirm("¿Eliminar este caso?")) return;
     await supabase.from("endodontics").delete().eq("id", id);
     setCases(prev => prev.filter(x => x.id !== id)); setDetail(null);
+  };
+
+  const saveEdit = async () => {
+    if (!editCase) return;
+    const payload = {
+      professional: editCase.professional,
+      professional_pct: Number(editCase.professional_pct) || 60,
+      date: editCase.date, tooth: editCase.tooth, endo_type: editCase.endo_type,
+      total_cost: Number(editCase.total_cost) || 0, lab_cost: Number(editCase.lab_cost) || 0,
+      paid: Number(editCase.paid) || 0, status: editCase.status, notes: editCase.notes || "",
+    };
+    const { error } = await supabase.from("endodontics").update(payload).eq("id", editCase.id);
+    if (!error) { setCases(prev => prev.map(x => x.id === editCase.id ? { ...x, ...payload } : x)); setEditCase(null); }
+    else alert("Error: " + error.message);
   };
 
   const updateStatus = async (id, status) => {
@@ -2127,6 +2207,12 @@ function EndodonciaView({ cases, setCases, patients }) {
                     <div style={{ fontWeight: 700, fontSize: 14, color: COLORS.text }}>{formatCLP(c.total_cost)}</div>
                     {showDebt && <div style={{ fontSize: 12, color: COLORS.danger }}>Debe {formatCLP(debt)}</div>}
                     <span style={{ background: statusBg[c.status] || COLORS.bg, color: statusColor[c.status] || COLORS.textMuted, borderRadius: 20, padding: "2px 10px", fontSize: 11, fontWeight: 700 }}>{c.status}</span>
+                    <div style={{ display: "flex", gap: 4, marginTop: 6, justifyContent: "flex-end" }}>
+                      <button onClick={e => { e.stopPropagation(); setEditCase({ ...c }); }}
+                        style={{ background: COLORS.accent + "18", color: COLORS.accent, border: "none", borderRadius: 6, padding: "3px 8px", fontSize: 11, cursor: "pointer", fontWeight: 600 }}>✏️ Editar</button>
+                      <button onClick={e => { e.stopPropagation(); deleteCase(c.id); }}
+                        style={{ background: COLORS.danger + "18", color: COLORS.danger, border: "none", borderRadius: 6, padding: "3px 8px", fontSize: 11, cursor: "pointer", fontWeight: 600 }}>🗑</button>
+                    </div>
                   </div>
                 </div>
               );
@@ -2229,6 +2315,72 @@ function EndodonciaView({ cases, setCases, patients }) {
           </div>
         );
       })()}
+
+      {/* MODAL EDITAR CASO */}
+      {editCase && (
+        <div style={{ position: "fixed", inset: 0, background: "#00000088", zIndex: 300, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+          <div style={{ background: COLORS.surface, borderRadius: 18, padding: 28, width: "100%", maxWidth: 520, maxHeight: "90vh", overflowY: "auto" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+              <h3 style={{ margin: 0, color: COLORS.text }}>✏️ Editar caso endodoncia</h3>
+              <button onClick={() => setEditCase(null)} style={{ background: "none", border: "none", fontSize: 22, cursor: "pointer", color: COLORS.textMuted }}>×</button>
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+              <div>
+                <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>Profesional *</label>
+                <input value={editCase.professional} onChange={e => setEditCase(f => ({ ...f, professional: e.target.value }))} placeholder="Nombre del endodoncista" style={{ width: "100%", padding: "8px 12px", border: `1px solid ${COLORS.border}`, borderRadius: 8, fontSize: 13, color: COLORS.text, background: COLORS.bg, boxSizing: "border-box" }} />
+              </div>
+              <div>
+                <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>% Comisión colega</label>
+                <input type="number" value={editCase.professional_pct} min={0} max={100} onChange={e => setEditCase(f => ({ ...f, professional_pct: e.target.value }))} style={{ width: "100%", padding: "8px 12px", border: `1px solid ${COLORS.border}`, borderRadius: 8, fontSize: 13, color: COLORS.text, background: COLORS.bg, boxSizing: "border-box" }} />
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                <div>
+                  <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>Tipo de endodoncia</label>
+                  <select value={editCase.endo_type} onChange={e => setEditCase(f => ({ ...f, endo_type: e.target.value }))} style={{ width: "100%", padding: "8px 12px", border: `1px solid ${COLORS.border}`, borderRadius: 8, fontSize: 13, color: COLORS.text, background: COLORS.bg, boxSizing: "border-box" }}>
+                    {["Unirradicular","Birradicular","Multirradicular","Retratamiento unirradicular","Retratamiento birradicular","Retratamiento multirradicular"].map(t => <option key={t} value={t}>{t}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>Pieza dental</label>
+                  <input value={editCase.tooth || ""} onChange={e => setEditCase(f => ({ ...f, tooth: e.target.value }))} placeholder="Ej: 26" style={{ width: "100%", padding: "8px 12px", border: `1px solid ${COLORS.border}`, borderRadius: 8, fontSize: 13, color: COLORS.text, background: COLORS.bg, boxSizing: "border-box" }} />
+                </div>
+              </div>
+              <div>
+                <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>Fecha</label>
+                <input type="date" value={editCase.date} onChange={e => setEditCase(f => ({ ...f, date: e.target.value }))} style={{ width: "100%", padding: "8px 12px", border: `1px solid ${COLORS.border}`, borderRadius: 8, fontSize: 13, color: COLORS.text, background: COLORS.bg, boxSizing: "border-box" }} />
+              </div>
+              <div>
+                <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>Costo total ($)</label>
+                <input type="number" value={editCase.total_cost} onChange={e => setEditCase(f => ({ ...f, total_cost: e.target.value }))} placeholder="0" style={{ width: "100%", padding: "8px 12px", border: `1px solid ${COLORS.border}`, borderRadius: 8, fontSize: 13, color: COLORS.text, background: COLORS.bg, boxSizing: "border-box" }} />
+              </div>
+              <div>
+                <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>Laboratorios ($)</label>
+                <input type="number" value={editCase.lab_cost} onChange={e => setEditCase(f => ({ ...f, lab_cost: e.target.value }))} placeholder="0" style={{ width: "100%", padding: "8px 12px", border: `1px solid ${COLORS.border}`, borderRadius: 8, fontSize: 13, color: COLORS.text, background: COLORS.bg, boxSizing: "border-box" }} />
+              </div>
+              <div>
+                <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>Monto pagado ($)</label>
+                <input type="number" value={editCase.paid} onChange={e => setEditCase(f => ({ ...f, paid: e.target.value }))} placeholder="0" style={{ width: "100%", padding: "8px 12px", border: `1px solid ${COLORS.border}`, borderRadius: 8, fontSize: 13, color: COLORS.text, background: COLORS.bg, boxSizing: "border-box" }} />
+              </div>
+              <div>
+                <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>Estado</label>
+                <select value={editCase.status} onChange={e => setEditCase(f => ({ ...f, status: e.target.value }))} style={{ width: "100%", padding: "8px 12px", border: `1px solid ${COLORS.border}`, borderRadius: 8, fontSize: 13, color: COLORS.text, background: COLORS.bg, boxSizing: "border-box" }}>
+                  <option value="planificado">Planificado</option>
+                  <option value="en proceso">En proceso</option>
+                  <option value="completado">Completado</option>
+                </select>
+              </div>
+              <div>
+                <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>Notas</label>
+                <textarea value={editCase.notes || ""} onChange={e => setEditCase(f => ({ ...f, notes: e.target.value }))} rows={2} style={{ width: "100%", padding: "8px 12px", border: `1px solid ${COLORS.border}`, borderRadius: 8, fontSize: 13, color: COLORS.text, background: COLORS.bg, boxSizing: "border-box", resize: "vertical" }} />
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: 10, marginTop: 20 }}>
+              <button onClick={() => setEditCase(null)} style={{ flex: 1, background: COLORS.bg, border: `1px solid ${COLORS.border}`, borderRadius: 10, padding: "10px", cursor: "pointer", color: COLORS.textMuted }}>Cancelar</button>
+              <button onClick={saveEdit} style={{ flex: 2, background: COLORS.accent, color: "#fff", border: "none", borderRadius: 10, padding: "10px", fontWeight: 700, cursor: "pointer", fontSize: 14 }}>Guardar cambios</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* MODAL AGREGAR SESIÓN */}
       {addSession && detail && (
@@ -2374,18 +2526,29 @@ function EndodonciaView({ cases, setCases, patients }) {
 // ORTODONCIA
 // ═══════════════════════════════════════════════════════
 function OrtodonciaView({ cases, setCases, patients }) {
-  const toOrtho = (r) => ({ ...r, patientId: r.patient_id, controls: r.controls || [] });
+  const toOrtho = (r) => ({ ...r, patientId: r.patient_id, controls: r.controls || [], payments: r.payments || [] });
   const getPatient = (id) => patients.find(p => p.id === Number(id));
 
-  const defaultForm = { patientId: "", professional: "", professional_pct: 40, start_date: today(), estimated_end: "", total_cost: "", lab_cost: "", bracket_cost: "", paid: "", status: "activo", notes: "" };
+  const ORTHO_ITEMS = [
+    { value: "inst_superior", label: "Instalación Superior",  icon: "⬆️" },
+    { value: "inst_inferior", label: "Instalación Inferior",  icon: "⬇️" },
+    { value: "control",       label: "Control",               icon: "🔧" },
+    { value: "bracket",       label: "Reposición de bracket", icon: "🔩" },
+    { value: "retiro",        label: "Retiro de brackets",    icon: "✅" },
+  ];
+  const PAYMENT_TYPES = ORTHO_ITEMS; // alias para el sistema de cobros
+
+  const defaultForm = { patientId: "", professional: "", professional_pct: 40, diagnosis_date: today(), start_date: today(), inst_superior_date: "", inst_inferior_date: "", control_price: "", estimated_end: "", total_cost: "", lab_cost: "", bracket_cost: "", paid: "", status: "activo", notes: "" };
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState(defaultForm);
   const [patSearch, setPatSearch] = useState("");
   const [patSugg, setPatSugg] = useState([]);
   const [detail, setDetail] = useState(null);
   const [addControl, setAddControl] = useState(false);
-  const [controlForm, setControlForm] = useState({ date: today(), notes: "" });
-  const [payInput, setPayInput] = useState("");
+  const [controlForm, setControlForm] = useState({ date: today(), type: "control", control_fee: "", bracket_fee: "", tooth: "", notes: "" });
+  const [addPayment, setAddPayment] = useState(false);
+  const [paymentForm, setPaymentForm] = useState({ date: today(), type: "inst_superior", amount: "", notes: "" });
+  const [editCase, setEditCase] = useState(null);
 
   const handlePatSearch = (val) => {
     setPatSearch(val); setForm(f => ({ ...f, patientId: "" }));
@@ -2395,14 +2558,19 @@ function OrtodonciaView({ cases, setCases, patients }) {
   };
 
   const saveForm = async () => {
-    if (!form.patientId || !form.professional) return;
+    if (!form.patientId) return;
     const payload = {
       patient_id: Number(form.patientId), professional: form.professional,
       professional_pct: Number(form.professional_pct) || 0,
-      start_date: form.start_date, estimated_end: form.estimated_end || null,
+      diagnosis_date: form.diagnosis_date || null,
+      start_date: form.start_date,
+      inst_superior_date: form.inst_superior_date || null,
+      inst_inferior_date: form.inst_inferior_date || null,
+      control_price: Number(form.control_price) || 0,
+      estimated_end: form.estimated_end || null,
       total_cost: Number(form.total_cost) || 0, lab_cost: Number(form.lab_cost) || 0,
       bracket_cost: Number(form.bracket_cost) || 0, paid: Number(form.paid) || 0,
-      status: form.status, notes: form.notes, controls: [],
+      status: form.status, notes: form.notes, controls: [], payments: [],
     };
     const { data, error } = await supabase.from("orthodontics").insert([payload]).select().single();
     if (!error) { setCases(prev => [toOrtho(data), ...prev]); setShowForm(false); setForm(defaultForm); setPatSearch(""); }
@@ -2412,9 +2580,21 @@ function OrtodonciaView({ cases, setCases, patients }) {
   const addControlToCase = async (caseId) => {
     const c = cases.find(x => x.id === caseId);
     if (!c) return;
-    const newControls = [...(c.controls || []), { date: controlForm.date, notes: controlForm.notes }];
-    const { error } = await supabase.from("orthodontics").update({ controls: newControls }).eq("id", caseId);
-    if (!error) { setCases(prev => prev.map(x => x.id === caseId ? { ...x, controls: newControls } : x)); setAddControl(false); setControlForm({ date: today(), notes: "" }); }
+    const controlFee   = Number(controlForm.control_fee) || 0;
+    const bracketFee   = Number(controlForm.bracket_fee) || 0;
+    const newControl   = { date: controlForm.date, type: controlForm.type, control_fee: controlFee, bracket_fee: bracketFee, tooth: controlForm.tooth, notes: controlForm.notes };
+    const newControls  = [...(c.controls || []), newControl];
+    // auto-register payments
+    const newPayments  = [...(c.payments || [])];
+    if (controlFee > 0)  newPayments.push({ date: controlForm.date, type: "control",  amount: controlFee,  notes: controlForm.notes });
+    if (bracketFee > 0)  newPayments.push({ date: controlForm.date, type: "bracket",  amount: bracketFee,  notes: controlForm.tooth ? `Diente ${controlForm.tooth}` : "" });
+    const newPaid = newPayments.reduce((s, p) => s + (p.amount || 0), 0);
+    const { error } = await supabase.from("orthodontics").update({ controls: newControls, payments: newPayments, paid: newPaid }).eq("id", caseId);
+    if (!error) {
+      setCases(prev => prev.map(x => x.id === caseId ? { ...x, controls: newControls, payments: newPayments, paid: newPaid } : x));
+      setAddControl(false);
+      setControlForm({ date: today(), type: "control", control_fee: "", bracket_fee: "", tooth: "", notes: "" });
+    }
   };
 
   const deleteCase = async (id) => {
@@ -2423,18 +2603,44 @@ function OrtodonciaView({ cases, setCases, patients }) {
     setCases(prev => prev.filter(x => x.id !== id)); setDetail(null);
   };
 
+  const saveEdit = async () => {
+    if (!editCase) return;
+    const payload = {
+      professional: editCase.professional,
+      professional_pct: Number(editCase.professional_pct) || 0,
+      start_date: editCase.start_date,
+      inst_superior_date: editCase.inst_superior_date || null,
+      inst_inferior_date: editCase.inst_inferior_date || null,
+      control_price: Number(editCase.control_price) || 0,
+      estimated_end: editCase.estimated_end || null,
+      total_cost: Number(editCase.total_cost) || 0, lab_cost: Number(editCase.lab_cost) || 0,
+      bracket_cost: Number(editCase.bracket_cost) || 0, paid: Number(editCase.paid) || 0,
+      status: editCase.status, notes: editCase.notes || "",
+    };
+    const { error } = await supabase.from("orthodontics").update(payload).eq("id", editCase.id);
+    if (!error) { setCases(prev => prev.map(x => x.id === editCase.id ? { ...x, ...payload } : x)); setEditCase(null); }
+    else alert("Error: " + error.message);
+  };
+
   const updateStatus = async (id, status) => {
     await supabase.from("orthodontics").update({ status }).eq("id", id);
     setCases(prev => prev.map(x => x.id === id ? { ...x, status } : x));
   };
 
-  const registerPay = async (c) => {
-    const amount = Number(payInput) || 0;
+  const addPaymentToCase = async (caseId) => {
+    const amount = Number(paymentForm.amount) || 0;
     if (!amount) return;
-    const newPaid = Math.min((c.paid || 0) + amount, c.total_cost);
-    await supabase.from("orthodontics").update({ paid: newPaid }).eq("id", c.id);
-    setCases(prev => prev.map(x => x.id === c.id ? { ...x, paid: newPaid } : x));
-    setPayInput("");
+    const c = cases.find(x => x.id === caseId);
+    if (!c) return;
+    const newPayment = { date: paymentForm.date, type: paymentForm.type, amount, notes: paymentForm.notes };
+    const newPayments = [...(c.payments || []), newPayment];
+    const newPaid = newPayments.reduce((s, p) => s + (p.amount || 0), 0);
+    const { error } = await supabase.from("orthodontics").update({ payments: newPayments, paid: newPaid }).eq("id", caseId);
+    if (!error) {
+      setCases(prev => prev.map(x => x.id === caseId ? { ...x, payments: newPayments, paid: newPaid } : x));
+      setAddPayment(false);
+      setPaymentForm({ date: today(), type: "instalacion", amount: "", notes: "" });
+    } else alert("Error: " + error.message);
   };
 
   const calcEarnings = (c) => {
@@ -2498,12 +2704,18 @@ function OrtodonciaView({ cases, setCases, patients }) {
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontWeight: 700, fontSize: 15, color: COLORS.text }}>{p?.name || "—"}</div>
                     <div style={{ fontSize: 12, color: COLORS.textMuted, marginTop: 2 }}>👨‍⚕️ {c.professional} · {c.professional_pct}% comisión</div>
-                    <div style={{ fontSize: 11, color: COLORS.textDim, marginTop: 2 }}>Inicio: {formatDate(c.start_date)}{c.estimated_end ? ` · Fin est.: ${formatDate(c.estimated_end)}` : ""}</div>
+                    <div style={{ fontSize: 11, color: COLORS.textDim, marginTop: 2 }}>Moldes: {formatDate(c.start_date)}{c.estimated_end ? ` · Fin est.: ${formatDate(c.estimated_end)}` : ""}</div>
                   </div>
                   <div style={{ textAlign: "right", flexShrink: 0 }}>
                     <div style={{ fontWeight: 700, fontSize: 14, color: COLORS.text }}>{formatCLP(c.total_cost)}</div>
                     {showDebt && <div style={{ fontSize: 12, color: COLORS.danger }}>Debe {formatCLP(debt)}</div>}
                     <span style={{ background: statusBg[c.status] || COLORS.bg, color: statusColor[c.status] || COLORS.textMuted, borderRadius: 20, padding: "2px 10px", fontSize: 11, fontWeight: 700 }}>{c.status}</span>
+                    <div style={{ display: "flex", gap: 4, marginTop: 6, justifyContent: "flex-end" }}>
+                      <button onClick={e => { e.stopPropagation(); setEditCase({ ...c }); }}
+                        style={{ background: COLORS.accent + "18", color: COLORS.accent, border: "none", borderRadius: 6, padding: "3px 8px", fontSize: 11, cursor: "pointer", fontWeight: 600 }}>✏️ Editar</button>
+                      <button onClick={e => { e.stopPropagation(); deleteCase(c.id); }}
+                        style={{ background: COLORS.danger + "18", color: COLORS.danger, border: "none", borderRadius: 6, padding: "3px 8px", fontSize: 11, cursor: "pointer", fontWeight: 600 }}>🗑</button>
+                    </div>
                   </div>
                 </div>
               );
@@ -2520,14 +2732,18 @@ function OrtodonciaView({ cases, setCases, patients }) {
             <div style={{ background: COLORS.surface, borderRadius: 18, padding: 28, width: "100%", maxWidth: 560, maxHeight: "90vh", overflowY: "auto", display: "flex", flexDirection: "column", gap: 18 }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                 <h3 style={{ margin: 0, color: COLORS.text }}>🦷 Caso Ortodoncia</h3>
-                <button onClick={() => { setDetail(null); setPayInput(""); }} style={{ background: "none", border: "none", fontSize: 24, cursor: "pointer", color: COLORS.textMuted }}>×</button>
+                <button onClick={() => setDetail(null)} style={{ background: "none", border: "none", fontSize: 24, cursor: "pointer", color: COLORS.textMuted }}>×</button>
               </div>
 
               <div style={{ background: COLORS.accent + "15", borderRadius: 10, padding: "12px 16px" }}>
                 <div style={{ fontWeight: 700, color: COLORS.text, fontSize: 15 }}>{p?.name}</div>
                 <div style={{ color: COLORS.textMuted, fontSize: 13 }}>👨‍⚕️ {detailCase.professional} · {detailCase.professional_pct}% comisión</div>
-                <div style={{ color: COLORS.textDim, fontSize: 12, marginTop: 4 }}>
-                  {formatDate(detailCase.start_date)}{detailCase.estimated_end ? ` → ${formatDate(detailCase.estimated_end)}` : ""}
+                <div style={{ color: COLORS.textDim, fontSize: 12, marginTop: 4, display: "flex", flexDirection: "column", gap: 2 }}>
+                  <span>📅 Moldes: {formatDate(detailCase.start_date)}{detailCase.estimated_end ? ` · Fin est.: ${formatDate(detailCase.estimated_end)}` : ""}</span>
+                  {(detailCase.inst_superior_date || detailCase.inst_inferior_date) && (
+                    <span>⬆️ Sup: {detailCase.inst_superior_date ? formatDate(detailCase.inst_superior_date) : "—"} · ⬇️ Inf: {detailCase.inst_inferior_date ? formatDate(detailCase.inst_inferior_date) : "—"}</span>
+                  )}
+                  {detailCase.control_price > 0 && <span>💰 Precio por control: {formatCLP(detailCase.control_price)}</span>}
                 </div>
                 <div style={{ marginTop: 6 }}>
                   <select value={detailCase.status} onChange={e => updateStatus(detailCase.id, e.target.value)}
@@ -2555,42 +2771,86 @@ function OrtodonciaView({ cases, setCases, patients }) {
                     <span style={{ fontWeight: row.bold ? 700 : 600, color: row.color || COLORS.text }}>{row.value}</span>
                   </div>
                 ))}
-                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 14, marginTop: 4 }}>
-                  <span style={{ color: COLORS.textMuted }}>Pagado</span>
+                {/* Resumen pagos por tipo */}
+                {(detailCase.payments || []).length > 0 && (() => {
+                  const byType = PAYMENT_TYPES.map(pt => ({
+                    ...pt,
+                    total: (detailCase.payments || []).filter(p => p.type === pt.value).reduce((s, p) => s + (p.amount || 0), 0),
+                  })).filter(pt => pt.total > 0);
+                  return (
+                    <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 4 }}>
+                      {byType.map(pt => (
+                        <div key={pt.value} style={{ display: "flex", justifyContent: "space-between", fontSize: 12 }}>
+                          <span style={{ color: COLORS.textMuted }}>{pt.icon} {pt.label}</span>
+                          <span style={{ fontWeight: 600, color: COLORS.success }}>{formatCLP(pt.total)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })()}
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 14, marginTop: 8, paddingTop: 8, borderTop: `1px solid ${COLORS.border}` }}>
+                  <span style={{ color: COLORS.textMuted }}>Total pagado</span>
                   <span style={{ fontWeight: 700, color: COLORS.success }}>{formatCLP(detailCase.paid)}</span>
                 </div>
                 <div style={{ display: "flex", justifyContent: "space-between", fontSize: 14, marginTop: 4 }}>
                   <span style={{ color: COLORS.textMuted }}>Por cobrar</span>
                   <span style={{ fontWeight: 700, color: debt > 0 ? COLORS.danger : COLORS.success }}>{formatCLP(debt)}</span>
                 </div>
-                <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
-                  <input type="number" placeholder="Monto a registrar" value={payInput} onChange={e => setPayInput(e.target.value)}
-                    style={{ flex: 1, padding: "7px 10px", border: `1px solid ${COLORS.border}`, borderRadius: 8, fontSize: 13 }} />
-                  <button onClick={() => registerPay(detailCase)}
-                    style={{ background: COLORS.success, color: "#fff", border: "none", borderRadius: 8, padding: "7px 14px", fontWeight: 700, cursor: "pointer", fontSize: 13 }}>
-                    + Pago
-                  </button>
-                </div>
+                <button onClick={() => setAddPayment(true)}
+                  style={{ marginTop: 12, width: "100%", background: COLORS.success, color: "#fff", border: "none", borderRadius: 8, padding: "9px", fontWeight: 700, cursor: "pointer", fontSize: 13 }}>
+                  💳 Registrar pago
+                </button>
               </div>
+
+              {/* Historial de pagos */}
+              {(detailCase.payments || []).length > 0 && (
+                <div>
+                  <div style={{ fontWeight: 700, color: COLORS.text, fontSize: 13, marginBottom: 8 }}>💳 Historial de cobros ({(detailCase.payments || []).length})</div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                    {[...(detailCase.payments || [])].reverse().map((pmt, i) => {
+                      const pt = PAYMENT_TYPES.find(x => x.value === pmt.type) || { icon: "💰", label: pmt.type };
+                      return (
+                        <div key={i} style={{ background: COLORS.bg, borderRadius: 8, padding: "8px 12px", display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                          <div>
+                            <div style={{ fontSize: 12, fontWeight: 700, color: COLORS.accent }}>{pt.icon} {pt.label}</div>
+                            <div style={{ fontSize: 11, color: COLORS.textDim, marginTop: 1 }}>{formatDate(pmt.date)}{pmt.notes ? ` · ${pmt.notes}` : ""}</div>
+                          </div>
+                          <span style={{ fontWeight: 700, color: COLORS.success, fontSize: 13 }}>{formatCLP(pmt.amount)}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
 
               {/* Controles */}
               <div>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-                  <div style={{ fontWeight: 700, color: COLORS.text, fontSize: 13 }}>📋 Controles ({(detailCase.controls || []).length})</div>
+                  <div style={{ fontWeight: 700, color: COLORS.text, fontSize: 13 }}>📋 Atenciones ({(detailCase.controls || []).length})</div>
                   <button onClick={() => setAddControl(true)}
                     style={{ background: COLORS.accent + "18", color: COLORS.accent, border: `1px solid ${COLORS.accent}44`, borderRadius: 8, padding: "5px 12px", fontSize: 12, cursor: "pointer", fontWeight: 700 }}>
                     + Agregar
                   </button>
                 </div>
                 {(detailCase.controls || []).length === 0
-                  ? <div style={{ color: COLORS.textDim, fontSize: 13, fontStyle: "italic" }}>Sin controles registrados</div>
+                  ? <div style={{ color: COLORS.textDim, fontSize: 13, fontStyle: "italic" }}>Sin atenciones registradas</div>
                   : <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                      {[...(detailCase.controls || [])].reverse().map((ctrl, i) => (
-                        <div key={i} style={{ background: COLORS.bg, borderRadius: 8, padding: "8px 12px" }}>
-                          <div style={{ fontWeight: 600, color: COLORS.accent, fontSize: 12 }}>{formatDate(ctrl.date)}</div>
-                          <div style={{ color: COLORS.text, fontSize: 13, marginTop: 2 }}>{ctrl.notes || "—"}</div>
-                        </div>
-                      ))}
+                      {[...(detailCase.controls || [])].reverse().map((ctrl, i) => {
+                        const item = ORTHO_ITEMS.find(x => x.value === ctrl.type) || { icon: "📋", label: ctrl.type || "Control" };
+                        return (
+                          <div key={i} style={{ background: COLORS.bg, borderRadius: 8, padding: "9px 12px" }}>
+                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                              <span style={{ fontWeight: 700, color: COLORS.accent, fontSize: 12 }}>{item.icon} {item.label}</span>
+                              <span style={{ fontSize: 11, color: COLORS.textDim }}>{formatDate(ctrl.date)}</span>
+                            </div>
+                            <div style={{ display: "flex", gap: 12, marginTop: 4, flexWrap: "wrap" }}>
+                              {ctrl.control_fee > 0 && <span style={{ fontSize: 11, color: COLORS.success, fontWeight: 600 }}>💰 {formatCLP(ctrl.control_fee)}</span>}
+                              {ctrl.bracket_fee > 0 && <span style={{ fontSize: 11, color: "#7c3aed", fontWeight: 600 }}>🔩 Bracket {formatCLP(ctrl.bracket_fee)}{ctrl.tooth ? ` · Diente ${ctrl.tooth}` : ""}</span>}
+                            </div>
+                            {ctrl.notes && <div style={{ color: COLORS.text, fontSize: 12, marginTop: 3 }}>{ctrl.notes}</div>}
+                          </div>
+                        );
+                      })}
                     </div>
                 }
               </div>
@@ -2608,20 +2868,167 @@ function OrtodonciaView({ cases, setCases, patients }) {
         );
       })()}
 
+      {/* MODAL REGISTRAR PAGO */}
+      {addPayment && detail && (
+        <div style={{ position: "fixed", inset: 0, background: "#00000088", zIndex: 300, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+          <div style={{ background: COLORS.surface, borderRadius: 16, padding: 24, width: "100%", maxWidth: 420 }}>
+            <h4 style={{ margin: "0 0 16px", color: COLORS.text }}>💳 Registrar cobro</h4>
+            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              <div>
+                <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>Tipo de cobro</label>
+                <select value={paymentForm.type} onChange={e => setPaymentForm(f => ({ ...f, type: e.target.value }))}
+                  style={{ width: "100%", padding: "8px 12px", border: `1px solid ${COLORS.border}`, borderRadius: 8, fontSize: 13, color: COLORS.text, background: COLORS.bg, boxSizing: "border-box" }}>
+                  {PAYMENT_TYPES.map(pt => <option key={pt.value} value={pt.value}>{pt.icon} {pt.label}</option>)}
+                </select>
+              </div>
+              <div>
+                <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>Fecha</label>
+                <input type="date" value={paymentForm.date} onChange={e => setPaymentForm(f => ({ ...f, date: e.target.value }))}
+                  style={{ width: "100%", padding: "8px 12px", border: `1px solid ${COLORS.border}`, borderRadius: 8, fontSize: 13, color: COLORS.text, background: COLORS.bg, boxSizing: "border-box" }} />
+              </div>
+              <div>
+                <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>Monto ($)</label>
+                <input type="number" value={paymentForm.amount} onChange={e => setPaymentForm(f => ({ ...f, amount: e.target.value }))} placeholder="0"
+                  style={{ width: "100%", padding: "8px 12px", border: `1px solid ${COLORS.border}`, borderRadius: 8, fontSize: 13, color: COLORS.text, background: COLORS.bg, boxSizing: "border-box" }} />
+              </div>
+              <div>
+                <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>Observaciones (opcional)</label>
+                <input value={paymentForm.notes} onChange={e => setPaymentForm(f => ({ ...f, notes: e.target.value }))} placeholder="Notas del cobro..."
+                  style={{ width: "100%", padding: "8px 12px", border: `1px solid ${COLORS.border}`, borderRadius: 8, fontSize: 13, color: COLORS.text, background: COLORS.bg, boxSizing: "border-box" }} />
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
+              <button onClick={() => { setAddPayment(false); setPaymentForm({ date: today(), type: "instalacion", amount: "", notes: "" }); }}
+                style={{ flex: 1, background: COLORS.bg, border: `1px solid ${COLORS.border}`, borderRadius: 8, padding: "9px", cursor: "pointer", color: COLORS.textMuted }}>Cancelar</button>
+              <button onClick={() => addPaymentToCase(detail)} disabled={!paymentForm.amount}
+                style={{ flex: 2, background: !paymentForm.amount ? COLORS.textDim : COLORS.success, color: "#fff", border: "none", borderRadius: 8, padding: "9px", cursor: "pointer", fontWeight: 700 }}>Registrar cobro</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL EDITAR CASO */}
+      {editCase && (
+        <div style={{ position: "fixed", inset: 0, background: "#00000088", zIndex: 300, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+          <div style={{ background: COLORS.surface, borderRadius: 18, padding: 28, width: "100%", maxWidth: 520, maxHeight: "90vh", overflowY: "auto" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+              <h3 style={{ margin: 0, color: COLORS.text }}>✏️ Editar caso ortodoncia</h3>
+              <button onClick={() => setEditCase(null)} style={{ background: "none", border: "none", fontSize: 22, cursor: "pointer", color: COLORS.textMuted }}>×</button>
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+              <div>
+                <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>Profesional *</label>
+                <input value={editCase.professional} onChange={e => setEditCase(f => ({ ...f, professional: e.target.value }))} placeholder="Nombre del ortodoncista" style={{ width: "100%", padding: "8px 12px", border: `1px solid ${COLORS.border}`, borderRadius: 8, fontSize: 13, color: COLORS.text, background: COLORS.bg, boxSizing: "border-box" }} />
+              </div>
+              <div>
+                <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>% Comisión profesional</label>
+                <input type="number" value={editCase.professional_pct} min={0} max={100} onChange={e => setEditCase(f => ({ ...f, professional_pct: e.target.value }))} style={{ width: "100%", padding: "8px 12px", border: `1px solid ${COLORS.border}`, borderRadius: 8, fontSize: 13, color: COLORS.text, background: COLORS.bg, boxSizing: "border-box" }} />
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                <div>
+                  <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>Fecha moldes</label>
+                  <input type="date" value={editCase.start_date} onChange={e => setEditCase(f => ({ ...f, start_date: e.target.value }))} style={{ width: "100%", padding: "8px 12px", border: `1px solid ${COLORS.border}`, borderRadius: 8, fontSize: 13, color: COLORS.text, background: COLORS.bg, boxSizing: "border-box" }} />
+                </div>
+                <div>
+                  <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>Fecha instalación superior</label>
+                  <input type="date" value={editCase.inst_superior_date || ""} onChange={e => setEditCase(f => ({ ...f, inst_superior_date: e.target.value }))} style={{ width: "100%", padding: "8px 12px", border: `1px solid ${COLORS.border}`, borderRadius: 8, fontSize: 13, color: COLORS.text, background: COLORS.bg, boxSizing: "border-box" }} />
+                </div>
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                <div>
+                  <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>Fecha instalación inferior</label>
+                  <input type="date" value={editCase.inst_inferior_date || ""} onChange={e => setEditCase(f => ({ ...f, inst_inferior_date: e.target.value }))} style={{ width: "100%", padding: "8px 12px", border: `1px solid ${COLORS.border}`, borderRadius: 8, fontSize: 13, color: COLORS.text, background: COLORS.bg, boxSizing: "border-box" }} />
+                </div>
+                <div>
+                  <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>Precio por control ($)</label>
+                  <input type="number" value={editCase.control_price || ""} onChange={e => setEditCase(f => ({ ...f, control_price: e.target.value }))} placeholder="0" style={{ width: "100%", padding: "8px 12px", border: `1px solid ${COLORS.border}`, borderRadius: 8, fontSize: 13, color: COLORS.text, background: COLORS.bg, boxSizing: "border-box" }} />
+                </div>
+              </div>
+              <div>
+                <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>Fin estimado</label>
+                <input type="date" value={editCase.estimated_end || ""} onChange={e => setEditCase(f => ({ ...f, estimated_end: e.target.value }))} style={{ width: "100%", padding: "8px 12px", border: `1px solid ${COLORS.border}`, borderRadius: 8, fontSize: 13, color: COLORS.text, background: COLORS.bg, boxSizing: "border-box" }} />
+              </div>
+              <div>
+                <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>Costo total ($)</label>
+                <input type="number" value={editCase.total_cost} onChange={e => setEditCase(f => ({ ...f, total_cost: e.target.value }))} placeholder="0" style={{ width: "100%", padding: "8px 12px", border: `1px solid ${COLORS.border}`, borderRadius: 8, fontSize: 13, color: COLORS.text, background: COLORS.bg, boxSizing: "border-box" }} />
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                <div>
+                  <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>Laboratorios ($)</label>
+                  <input type="number" value={editCase.lab_cost} onChange={e => setEditCase(f => ({ ...f, lab_cost: e.target.value }))} placeholder="0" style={{ width: "100%", padding: "8px 12px", border: `1px solid ${COLORS.border}`, borderRadius: 8, fontSize: 13, color: COLORS.text, background: COLORS.bg, boxSizing: "border-box" }} />
+                </div>
+                <div>
+                  <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>Reposición brackets ($)</label>
+                  <input type="number" value={editCase.bracket_cost} onChange={e => setEditCase(f => ({ ...f, bracket_cost: e.target.value }))} placeholder="0" style={{ width: "100%", padding: "8px 12px", border: `1px solid ${COLORS.border}`, borderRadius: 8, fontSize: 13, color: COLORS.text, background: COLORS.bg, boxSizing: "border-box" }} />
+                </div>
+              </div>
+              <div>
+                <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>Monto pagado ($)</label>
+                <input type="number" value={editCase.paid} onChange={e => setEditCase(f => ({ ...f, paid: e.target.value }))} placeholder="0" style={{ width: "100%", padding: "8px 12px", border: `1px solid ${COLORS.border}`, borderRadius: 8, fontSize: 13, color: COLORS.text, background: COLORS.bg, boxSizing: "border-box" }} />
+              </div>
+              <div>
+                <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>Estado</label>
+                <select value={editCase.status} onChange={e => setEditCase(f => ({ ...f, status: e.target.value }))} style={{ width: "100%", padding: "8px 12px", border: `1px solid ${COLORS.border}`, borderRadius: 8, fontSize: 13, color: COLORS.text, background: COLORS.bg, boxSizing: "border-box" }}>
+                  <option value="activo">Activo</option>
+                  <option value="completado">Completado</option>
+                  <option value="abandonado">Abandonado</option>
+                </select>
+              </div>
+              <div>
+                <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>Notas</label>
+                <textarea value={editCase.notes || ""} onChange={e => setEditCase(f => ({ ...f, notes: e.target.value }))} rows={2} style={{ width: "100%", padding: "8px 12px", border: `1px solid ${COLORS.border}`, borderRadius: 8, fontSize: 13, color: COLORS.text, background: COLORS.bg, boxSizing: "border-box", resize: "vertical" }} />
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: 10, marginTop: 20 }}>
+              <button onClick={() => setEditCase(null)} style={{ flex: 1, background: COLORS.bg, border: `1px solid ${COLORS.border}`, borderRadius: 10, padding: "10px", cursor: "pointer", color: COLORS.textMuted }}>Cancelar</button>
+              <button onClick={saveEdit} style={{ flex: 2, background: COLORS.accent, color: "#fff", border: "none", borderRadius: 10, padding: "10px", fontWeight: 700, cursor: "pointer", fontSize: 14 }}>Guardar cambios</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* MODAL AGREGAR CONTROL */}
       {addControl && detail && (
         <div style={{ position: "fixed", inset: 0, background: "#00000088", zIndex: 300, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
-          <div style={{ background: COLORS.surface, borderRadius: 16, padding: 24, width: "100%", maxWidth: 400 }}>
-            <h4 style={{ margin: "0 0 16px", color: COLORS.text }}>📋 Agregar control</h4>
+          <div style={{ background: COLORS.surface, borderRadius: 16, padding: 24, width: "100%", maxWidth: 440 }}>
+            <h4 style={{ margin: "0 0 16px", color: COLORS.text }}>📋 Registrar control</h4>
             <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                <div>
+                  <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>Tipo de atención</label>
+                  <select value={controlForm.type} onChange={e => setControlForm(f => ({ ...f, type: e.target.value }))} style={inputStyle}>
+                    {ORTHO_ITEMS.map(it => <option key={it.value} value={it.value}>{it.icon} {it.label}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>Fecha</label>
+                  <input type="date" value={controlForm.date} onChange={e => setControlForm(f => ({ ...f, date: e.target.value }))} style={inputStyle} />
+                </div>
+              </div>
               <div>
-                <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>Fecha</label>
-                <input type="date" value={controlForm.date} onChange={e => setControlForm(f => ({ ...f, date: e.target.value }))} style={inputStyle} />
+                <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>💰 Valor del control ($)</label>
+                <input type="number" value={controlForm.control_fee} onChange={e => setControlForm(f => ({ ...f, control_fee: e.target.value }))}
+                  placeholder={detailCase?.control_price > 0 ? `Precio fijo: $ ${Number(detailCase.control_price).toLocaleString("es-CL")}` : "0"} style={inputStyle} />
+              </div>
+              <div style={{ background: COLORS.bg, borderRadius: 10, padding: "12px 14px", display: "flex", flexDirection: "column", gap: 10 }}>
+                <div style={{ fontWeight: 700, color: COLORS.textMuted, fontSize: 12 }}>🔩 Reposición de bracket <span style={{ fontWeight: 400 }}>(opcional)</span></div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                  <div>
+                    <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>Valor reposición ($)</label>
+                    <input type="number" value={controlForm.bracket_fee} onChange={e => setControlForm(f => ({ ...f, bracket_fee: e.target.value }))}
+                      placeholder="0" style={inputStyle} />
+                  </div>
+                  <div>
+                    <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>N° diente</label>
+                    <input value={controlForm.tooth} onChange={e => setControlForm(f => ({ ...f, tooth: e.target.value }))}
+                      placeholder="Ej: 14" style={inputStyle} />
+                  </div>
+                </div>
               </div>
               <div>
                 <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>Observaciones</label>
-                <textarea value={controlForm.notes} onChange={e => setControlForm(f => ({ ...f, notes: e.target.value }))} rows={3}
-                  placeholder="Ajustes, evolución, observaciones..." style={{ ...inputStyle, resize: "vertical" }} />
+                <textarea value={controlForm.notes} onChange={e => setControlForm(f => ({ ...f, notes: e.target.value }))} rows={2}
+                  placeholder="Ajustes, evolución..." style={{ ...inputStyle, resize: "vertical" }} />
               </div>
             </div>
             <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
@@ -2658,78 +3065,35 @@ function OrtodonciaView({ cases, setCases, patients }) {
                   </div>
                 )}
               </div>
-              <div>
-                <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>Profesional *</label>
-                <input value={form.professional} onChange={e => setForm(f => ({ ...f, professional: e.target.value }))} placeholder="Nombre del ortodoncista" style={inputStyle} />
-              </div>
-              <div>
-                <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>% Comisión profesional</label>
-                <input type="number" value={form.professional_pct} min={0} max={100} onChange={e => setForm(f => ({ ...f, professional_pct: e.target.value }))} style={inputStyle} />
-              </div>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
                 <div>
-                  <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>Fecha inicio</label>
+                  <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>Fecha moldes</label>
                   <input type="date" value={form.start_date} onChange={e => setForm(f => ({ ...f, start_date: e.target.value }))} style={inputStyle} />
                 </div>
                 <div>
-                  <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>Fin estimado</label>
-                  <input type="date" value={form.estimated_end} onChange={e => setForm(f => ({ ...f, estimated_end: e.target.value }))} style={inputStyle} />
+                  <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>Fecha instalación superior</label>
+                  <input type="date" value={form.inst_superior_date} onChange={e => setForm(f => ({ ...f, inst_superior_date: e.target.value }))} style={inputStyle} />
+                </div>
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                <div>
+                  <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>Fecha instalación inferior</label>
+                  <input type="date" value={form.inst_inferior_date} onChange={e => setForm(f => ({ ...f, inst_inferior_date: e.target.value }))} style={inputStyle} />
+                </div>
+                <div>
+                  <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>Precio por control ($)</label>
+                  <input type="number" value={form.control_price} onChange={e => setForm(f => ({ ...f, control_price: e.target.value }))} placeholder="0" style={inputStyle} />
                 </div>
               </div>
               <div>
                 <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>Costo total tratamiento ($)</label>
                 <input type="number" value={form.total_cost} onChange={e => setForm(f => ({ ...f, total_cost: e.target.value }))} placeholder="0" style={inputStyle} />
               </div>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-                <div>
-                  <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>Laboratorios ($)</label>
-                  <input type="number" value={form.lab_cost} onChange={e => setForm(f => ({ ...f, lab_cost: e.target.value }))} placeholder="0" style={inputStyle} />
-                </div>
-                <div>
-                  <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>Reposición brackets ($)</label>
-                  <input type="number" value={form.bracket_cost} onChange={e => setForm(f => ({ ...f, bracket_cost: e.target.value }))} placeholder="0" style={inputStyle} />
-                </div>
-              </div>
-              <div>
-                <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>Monto pagado ($)</label>
-                <input type="number" value={form.paid} onChange={e => setForm(f => ({ ...f, paid: e.target.value }))} placeholder="0" style={inputStyle} />
-              </div>
-              {Number(form.total_cost) > 0 && (() => {
-                const base = Number(form.total_cost) - Number(form.lab_cost || 0) - Number(form.bracket_cost || 0);
-                const profE = Math.round(base * Number(form.professional_pct || 0) / 100);
-                const clinicE = base - profE;
-                return (
-                  <div style={{ background: "#f0fdf4", border: "1px solid #86efac", borderRadius: 10, padding: "12px 14px" }}>
-                    <div style={{ fontWeight: 700, color: COLORS.success, marginBottom: 8, fontSize: 12 }}>Vista previa distribución</div>
-                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, marginBottom: 4 }}>
-                      <span style={{ color: COLORS.textMuted }}>Base neta (sin lab. ni brackets)</span><span style={{ fontWeight: 700 }}>{formatCLP(base)}</span>
-                    </div>
-                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, marginBottom: 4 }}>
-                      <span style={{ color: "#7c3aed" }}>Profesional ({form.professional_pct}%)</span><span style={{ fontWeight: 700, color: "#7c3aed" }}>{formatCLP(profE)}</span>
-                    </div>
-                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12 }}>
-                      <span style={{ color: COLORS.success }}>Clínica ({100 - Number(form.professional_pct)}%)</span><span style={{ fontWeight: 700, color: COLORS.success }}>{formatCLP(clinicE)}</span>
-                    </div>
-                  </div>
-                );
-              })()}
-              <div>
-                <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>Estado</label>
-                <select value={form.status} onChange={e => setForm(f => ({ ...f, status: e.target.value }))} style={inputStyle}>
-                  <option value="activo">Activo</option>
-                  <option value="completado">Completado</option>
-                  <option value="abandonado">Abandonado</option>
-                </select>
-              </div>
-              <div>
-                <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>Notas</label>
-                <textarea value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} rows={2} style={{ ...inputStyle, resize: "vertical" }} />
-              </div>
             </div>
             <div style={{ display: "flex", gap: 10, marginTop: 20 }}>
               <button onClick={() => setShowForm(false)} style={{ flex: 1, background: COLORS.bg, border: `1px solid ${COLORS.border}`, borderRadius: 10, padding: "10px", cursor: "pointer", color: COLORS.textMuted }}>Cancelar</button>
-              <button onClick={saveForm} disabled={!form.patientId || !form.professional}
-                style={{ flex: 2, background: !form.patientId || !form.professional ? COLORS.textDim : COLORS.accent, color: "#fff", border: "none", borderRadius: 10, padding: "10px", fontWeight: 700, cursor: "pointer", fontSize: 14 }}>
+              <button onClick={saveForm} disabled={!form.patientId}
+                style={{ flex: 2, background: !form.patientId ? COLORS.textDim : COLORS.accent, color: "#fff", border: "none", borderRadius: 10, padding: "10px", fontWeight: 700, cursor: "pointer", fontSize: 14 }}>
                 Guardar caso
               </button>
             </div>
@@ -2758,6 +3122,7 @@ function ImplantologiaView({ cases, setCases, patients }) {
   const [addPhase, setAddPhase] = useState(false);
   const [phaseForm, setPhaseForm] = useState({ date: today(), name: "Cirugía de implante", notes: "" });
   const [payInput, setPayInput] = useState("");
+  const [editCase, setEditCase] = useState(null);
 
   const PHASE_NAMES = ["Evaluación y planificación", "Cirugía de implante", "Período de oseointegración", "Instalación de cicatrizal", "Toma de impresión", "Instalación de corona", "Control post-operatorio"];
 
@@ -2794,6 +3159,20 @@ function ImplantologiaView({ cases, setCases, patients }) {
     if (!window.confirm("¿Eliminar este caso?")) return;
     await supabase.from("implantology").delete().eq("id", id);
     setCases(prev => prev.filter(x => x.id !== id)); setDetail(null);
+  };
+
+  const saveEdit = async () => {
+    if (!editCase) return;
+    const payload = {
+      professional: editCase.professional,
+      professional_pct: Number(editCase.professional_pct) || 0,
+      date: editCase.date, implant_type: editCase.implant_type, tooth: editCase.tooth || "",
+      total_cost: Number(editCase.total_cost) || 0, lab_cost: Number(editCase.lab_cost) || 0,
+      paid: Number(editCase.paid) || 0, status: editCase.status, notes: editCase.notes || "",
+    };
+    const { error } = await supabase.from("implantology").update(payload).eq("id", editCase.id);
+    if (!error) { setCases(prev => prev.map(x => x.id === editCase.id ? { ...x, ...payload } : x)); setEditCase(null); }
+    else alert("Error: " + error.message);
   };
 
   const updateStatus = async (id, status) => {
@@ -2876,6 +3255,12 @@ function ImplantologiaView({ cases, setCases, patients }) {
                     <div style={{ fontWeight: 700, fontSize: 14, color: COLORS.text }}>{formatCLP(c.total_cost)}</div>
                     {showDebt && <div style={{ fontSize: 12, color: COLORS.danger }}>Debe {formatCLP(debt)}</div>}
                     <span style={{ background: statusBg[c.status] || COLORS.bg, color: statusColor[c.status] || COLORS.textMuted, borderRadius: 20, padding: "2px 10px", fontSize: 11, fontWeight: 700 }}>{c.status}</span>
+                    <div style={{ display: "flex", gap: 4, marginTop: 6, justifyContent: "flex-end" }}>
+                      <button onClick={e => { e.stopPropagation(); setEditCase({ ...c }); }}
+                        style={{ background: COLORS.accent + "18", color: COLORS.accent, border: "none", borderRadius: 6, padding: "3px 8px", fontSize: 11, cursor: "pointer", fontWeight: 600 }}>✏️ Editar</button>
+                      <button onClick={e => { e.stopPropagation(); deleteCase(c.id); }}
+                        style={{ background: COLORS.danger + "18", color: COLORS.danger, border: "none", borderRadius: 6, padding: "3px 8px", fontSize: 11, cursor: "pointer", fontWeight: 600 }}>🗑</button>
+                    </div>
                   </div>
                 </div>
               );
@@ -2979,6 +3364,72 @@ function ImplantologiaView({ cases, setCases, patients }) {
           </div>
         );
       })()}
+
+      {/* MODAL EDITAR CASO */}
+      {editCase && (
+        <div style={{ position: "fixed", inset: 0, background: "#00000088", zIndex: 300, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+          <div style={{ background: COLORS.surface, borderRadius: 18, padding: 28, width: "100%", maxWidth: 520, maxHeight: "90vh", overflowY: "auto" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+              <h3 style={{ margin: 0, color: COLORS.text }}>✏️ Editar caso implantología</h3>
+              <button onClick={() => setEditCase(null)} style={{ background: "none", border: "none", fontSize: 22, cursor: "pointer", color: COLORS.textMuted }}>×</button>
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+              <div>
+                <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>Profesional *</label>
+                <input value={editCase.professional} onChange={e => setEditCase(f => ({ ...f, professional: e.target.value }))} placeholder="Nombre del implantólogo" style={{ width: "100%", padding: "8px 12px", border: `1px solid ${COLORS.border}`, borderRadius: 8, fontSize: 13, color: COLORS.text, background: COLORS.bg, boxSizing: "border-box" }} />
+              </div>
+              <div>
+                <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>% Comisión profesional</label>
+                <input type="number" value={editCase.professional_pct} min={0} max={100} onChange={e => setEditCase(f => ({ ...f, professional_pct: e.target.value }))} style={{ width: "100%", padding: "8px 12px", border: `1px solid ${COLORS.border}`, borderRadius: 8, fontSize: 13, color: COLORS.text, background: COLORS.bg, boxSizing: "border-box" }} />
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                <div>
+                  <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>Tipo de implante</label>
+                  <select value={editCase.implant_type} onChange={e => setEditCase(f => ({ ...f, implant_type: e.target.value }))} style={{ width: "100%", padding: "8px 12px", border: `1px solid ${COLORS.border}`, borderRadius: 8, fontSize: 13, color: COLORS.text, background: COLORS.bg, boxSizing: "border-box" }}>
+                    {["Implante unitario","Implante múltiple","All-on-4","All-on-6","Implante cigomático","Mini-implante","Implante post-extracción","Otro"].map(t => <option key={t} value={t}>{t}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>Pieza dental</label>
+                  <input value={editCase.tooth || ""} onChange={e => setEditCase(f => ({ ...f, tooth: e.target.value }))} placeholder="Ej: 16" style={{ width: "100%", padding: "8px 12px", border: `1px solid ${COLORS.border}`, borderRadius: 8, fontSize: 13, color: COLORS.text, background: COLORS.bg, boxSizing: "border-box" }} />
+                </div>
+              </div>
+              <div>
+                <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>Fecha</label>
+                <input type="date" value={editCase.date} onChange={e => setEditCase(f => ({ ...f, date: e.target.value }))} style={{ width: "100%", padding: "8px 12px", border: `1px solid ${COLORS.border}`, borderRadius: 8, fontSize: 13, color: COLORS.text, background: COLORS.bg, boxSizing: "border-box" }} />
+              </div>
+              <div>
+                <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>Costo total ($)</label>
+                <input type="number" value={editCase.total_cost} onChange={e => setEditCase(f => ({ ...f, total_cost: e.target.value }))} placeholder="0" style={{ width: "100%", padding: "8px 12px", border: `1px solid ${COLORS.border}`, borderRadius: 8, fontSize: 13, color: COLORS.text, background: COLORS.bg, boxSizing: "border-box" }} />
+              </div>
+              <div>
+                <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>Laboratorios ($) — excluido de comisión</label>
+                <input type="number" value={editCase.lab_cost} onChange={e => setEditCase(f => ({ ...f, lab_cost: e.target.value }))} placeholder="0" style={{ width: "100%", padding: "8px 12px", border: `1px solid ${COLORS.border}`, borderRadius: 8, fontSize: 13, color: COLORS.text, background: COLORS.bg, boxSizing: "border-box" }} />
+              </div>
+              <div>
+                <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>Monto pagado ($)</label>
+                <input type="number" value={editCase.paid} onChange={e => setEditCase(f => ({ ...f, paid: e.target.value }))} placeholder="0" style={{ width: "100%", padding: "8px 12px", border: `1px solid ${COLORS.border}`, borderRadius: 8, fontSize: 13, color: COLORS.text, background: COLORS.bg, boxSizing: "border-box" }} />
+              </div>
+              <div>
+                <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>Estado</label>
+                <select value={editCase.status} onChange={e => setEditCase(f => ({ ...f, status: e.target.value }))} style={{ width: "100%", padding: "8px 12px", border: `1px solid ${COLORS.border}`, borderRadius: 8, fontSize: 13, color: COLORS.text, background: COLORS.bg, boxSizing: "border-box" }}>
+                  <option value="planificado">Planificado</option>
+                  <option value="en proceso">En proceso</option>
+                  <option value="completado">Completado</option>
+                </select>
+              </div>
+              <div>
+                <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>Notas</label>
+                <textarea value={editCase.notes || ""} onChange={e => setEditCase(f => ({ ...f, notes: e.target.value }))} rows={2} style={{ width: "100%", padding: "8px 12px", border: `1px solid ${COLORS.border}`, borderRadius: 8, fontSize: 13, color: COLORS.text, background: COLORS.bg, boxSizing: "border-box", resize: "vertical" }} />
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: 10, marginTop: 20 }}>
+              <button onClick={() => setEditCase(null)} style={{ flex: 1, background: COLORS.bg, border: `1px solid ${COLORS.border}`, borderRadius: 10, padding: "10px", cursor: "pointer", color: COLORS.textMuted }}>Cancelar</button>
+              <button onClick={saveEdit} style={{ flex: 2, background: COLORS.accent, color: "#fff", border: "none", borderRadius: 10, padding: "10px", fontWeight: 700, cursor: "pointer", fontSize: 14 }}>Guardar cambios</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* MODAL AGREGAR FASE */}
       {addPhase && detail && (
@@ -3964,7 +4415,8 @@ function BudgetView({ budgets, setBudgets, patients, treatments, setTreatments }
 
   // Add line item
   const addItem = () => {
-    if (!newItem.procedure || !newItem.unitPrice) return;
+    if (!newItem.procedure) { alert("Selecciona un procedimiento."); return; }
+    if (!newItem.unitPrice || Number(newItem.unitPrice) <= 0) { alert("Ingresa el precio unitario."); return; }
     setForm(f => ({ ...f, items: [...f.items, { ...newItem, unitPrice: Number(newItem.unitPrice), id: Date.now() }] }));
     setNewItem({ procedure: "Limpieza dental", tooth: "-", quantity: 1, unitPrice: "" });
   };
@@ -4027,7 +4479,8 @@ function BudgetView({ budgets, setBudgets, patients, treatments, setTreatments }
   };
 
   const addEditItem = () => {
-    if (!editNewItem.procedure || !editNewItem.unitPrice) return;
+    if (!editNewItem.procedure) { alert("Selecciona un procedimiento."); return; }
+    if (!editNewItem.unitPrice || Number(editNewItem.unitPrice) <= 0) { alert("Ingresa el precio unitario."); return; }
     setEditForm(f => ({ ...f, items: [...f.items, { ...editNewItem, unitPrice: Number(editNewItem.unitPrice), id: Date.now() }] }));
     setEditNewItem({ procedure: "Limpieza dental", tooth: "-", quantity: 1, unitPrice: "" });
   };
@@ -4081,6 +4534,49 @@ function BudgetView({ budgets, setBudgets, patients, treatments, setTreatments }
     // Marcar presupuesto como aceptado si no lo estaba
     if (budget.status !== "aceptado") await updateStatus(budget.id, "aceptado");
     alert(`✅ Se crearon ${(data || []).length} tratamiento${(data || []).length !== 1 ? "s" : ""} en el historial clínico de ${p?.name}.`);
+  };
+
+  // Send budget by email via mailto
+  const sendBudgetEmail = (budget) => {
+    const p = getPatient(budget.patientId);
+    if (!p?.email) { alert("Este paciente no tiene correo registrado. Agrégalo en su ficha."); return; }
+    const sub = calcSubtotal(budget.items);
+    const disc = calcDiscount(budget.items, budget.discount);
+    const total = calcTotal(budget.items, budget.discount);
+    const num = `N° ${String(budget.id).padStart(4, "0")}`;
+
+    const itemLines = (budget.items || []).map((it, i) =>
+      `  ${i + 1}. ${it.procedure}${it.tooth && it.tooth !== "-" ? ` (FDI ${it.tooth})` : ""}  x${it.quantity}  ${formatCLP(it.unitPrice)}  →  ${formatCLP(it.quantity * it.unitPrice)}`
+    ).join("\n");
+
+    const discLine = budget.discount > 0 ? `\nDescuento (${budget.discount}%):   -${formatCLP(disc)}` : "";
+
+    const body = `Estimado/a ${p.name},
+
+Junto con saludar, le hacemos llegar el Presupuesto Dental ${num} de Clínica Olimpia.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  PRESUPUESTO DENTAL  ${num}
+  Fecha: ${formatDate(budget.date)}${budget.valid_until ? `   |   Válido hasta: ${formatDate(budget.valid_until)}` : ""}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+PROCEDIMIENTOS:
+${itemLines}
+
+────────────────────────────────
+Subtotal:   ${formatCLP(sub)}${discLine}
+TOTAL:      ${formatCLP(total)}
+────────────────────────────────
+
+${budget.notes ? `Observaciones:\n${budget.notes}\n\n` : ""}Para consultas o agendar su hora, no dude en contactarnos.
+
+Saludos cordiales,
+Dra. María Florencia Muñoz — Cirujano Dentista
+Clínica Olimpia · Arturo Prat 350, Of. 506 · Temuco`;
+
+    const mailto = `mailto:${p.email}?subject=${encodeURIComponent(`Presupuesto Dental ${num} — Clínica Olimpia`)}&body=${encodeURIComponent(body)}`;
+    window.open(mailto, "_blank");
+    if (budget.status === "borrador") updateStatus(budget.id, "enviado");
   };
 
   // Export PDF
@@ -4328,6 +4824,11 @@ function BudgetView({ budgets, setBudgets, patients, treatments, setTreatments }
                     style={{ background: COLORS.accent + "18", color: COLORS.accent, border: `1px solid ${COLORS.accent}33`, borderRadius: 6, padding: "5px 12px", fontSize: 12, cursor: "pointer", fontWeight: 600 }}>
                     👁 Ver / PDF
                   </button>
+                  <button onClick={() => sendBudgetEmail(b)}
+                    title={p?.email ? `Enviar a ${p.email}` : "Sin correo registrado"}
+                    style={{ background: p?.email ? "#eff6ff" : COLORS.bg, color: p?.email ? COLORS.accent : COLORS.textDim, border: `1px solid ${p?.email ? COLORS.accent + "44" : COLORS.border}`, borderRadius: 6, padding: "5px 12px", fontSize: 12, cursor: "pointer", fontWeight: 600, display: "flex", alignItems: "center", gap: 4 }}>
+                    ✉️ Enviar correo
+                  </button>
                   <button onClick={() => openEdit(b)}
                     style={{ background: COLORS.warning + "15", color: COLORS.warning, border: `1px solid ${COLORS.warning}44`, borderRadius: 6, padding: "5px 12px", fontSize: 12, cursor: "pointer", fontWeight: 600 }}>
                     ✏️ Editar
@@ -4389,7 +4890,8 @@ function BudgetView({ budgets, setBudgets, patients, treatments, setTreatments }
                   {patSugg.length > 0 && (
                     <div style={{ position: "absolute", top: "100%", left: 0, right: 0, background: COLORS.card, border: `1px solid ${COLORS.border}`, borderRadius: 10, zIndex: 300, boxShadow: "0 8px 24px rgba(0,0,0,0.12)" }}>
                       {patSugg.map(p => (
-                        <div key={p.id} onClick={() => { setPatSearch(p.name); setForm(f => ({ ...f, patientId: String(p.id) })); setPatSugg([]); }}
+                        <div key={p.id}
+                          onMouseDown={e => { e.preventDefault(); setPatSearch(p.name); setForm(f => ({ ...f, patientId: String(p.id) })); setPatSugg([]); }}
                           style={{ padding: "10px 14px", cursor: "pointer", display: "flex", justifyContent: "space-between", borderBottom: `1px solid ${COLORS.border}` }}
                           onMouseEnter={e => e.currentTarget.style.background = COLORS.bg}
                           onMouseLeave={e => e.currentTarget.style.background = ""}>
@@ -4540,7 +5042,8 @@ function BudgetView({ budgets, setBudgets, patients, treatments, setTreatments }
                   {editPatSugg.length > 0 && (
                     <div style={{ position: "absolute", top: "100%", left: 0, right: 0, background: COLORS.card, border: `1px solid ${COLORS.border}`, borderRadius: 10, zIndex: 300, boxShadow: "0 8px 24px rgba(0,0,0,0.12)" }}>
                       {editPatSugg.map(p => (
-                        <div key={p.id} onClick={() => { setEditPatSearch(p.name); setEditForm(f => ({ ...f, patientId: String(p.id) })); setEditPatSugg([]); }}
+                        <div key={p.id}
+                          onMouseDown={e => { e.preventDefault(); setEditPatSearch(p.name); setEditForm(f => ({ ...f, patientId: String(p.id) })); setEditPatSugg([]); }}
                           style={{ padding: "10px 14px", cursor: "pointer", display: "flex", justifyContent: "space-between", borderBottom: `1px solid ${COLORS.border}` }}
                           onMouseEnter={e => e.currentTarget.style.background = COLORS.bg}
                           onMouseLeave={e => e.currentTarget.style.background = ""}>
@@ -4755,6 +5258,11 @@ function BudgetView({ budgets, setBudgets, patients, treatments, setTreatments }
                   style={{ flex: 1, minWidth: 160, background: COLORS.accent, color: "#fff", border: "none", borderRadius: 8, padding: "11px 16px", fontWeight: 700, cursor: "pointer", fontSize: 14, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
                   📄 Descargar PDF
                 </button>
+                <button onClick={() => sendBudgetEmail(preview)}
+                  title={getPatient(preview.patientId)?.email ? `Enviar a ${getPatient(preview.patientId).email}` : "Sin correo registrado"}
+                  style={{ flex: 1, minWidth: 160, background: "#eff6ff", color: COLORS.accent, border: `1.5px solid ${COLORS.accent}44`, borderRadius: 8, padding: "11px 16px", fontWeight: 700, cursor: "pointer", fontSize: 14, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
+                  ✉️ Enviar por correo
+                </button>
                 <button onClick={() => { setPreview(null); openEdit(preview); }}
                   style={{ background: COLORS.warning + "15", color: COLORS.warning, border: `1px solid ${COLORS.warning}44`, borderRadius: 8, padding: "11px 16px", fontWeight: 700, cursor: "pointer", fontSize: 14 }}>
                   ✏️ Editar
@@ -4842,7 +5350,7 @@ export default function App() {
       setTreatments((t.data || []).map(toTreat));
       setBudgets(((b && b.data) || []).map(toBudget));
       setAestheticCases(((ac && ac.data) || []).map(toAesthetic));
-      setOrthodonticsCases(((orth && orth.data) || []).map(r => ({ ...r, patientId: r.patient_id, controls: r.controls || [] })));
+      setOrthodonticsCases(((orth && orth.data) || []).map(r => ({ ...r, patientId: r.patient_id, controls: r.controls || [], payments: r.payments || [] })));
       setImplantologyCases(((impl && impl.data) || []).map(r => ({ ...r, patientId: r.patient_id, phases: r.phases || [] })));
       setEndodonticsCases(((endo && endo.data) || []).map(r => ({ ...r, patientId: r.patient_id, sessions: r.sessions || [] })));
       setLoading(false);
