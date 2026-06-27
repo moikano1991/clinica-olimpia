@@ -4494,6 +4494,49 @@ function BudgetView({ budgets, setBudgets, patients, treatments, setTreatments }
     alert(`✅ Se crearon ${(data || []).length} tratamiento${(data || []).length !== 1 ? "s" : ""} en el historial clínico de ${p?.name}.`);
   };
 
+  // Send budget by email via mailto
+  const sendBudgetEmail = (budget) => {
+    const p = getPatient(budget.patientId);
+    if (!p?.email) { alert("Este paciente no tiene correo registrado. Agrégalo en su ficha."); return; }
+    const sub = calcSubtotal(budget.items);
+    const disc = calcDiscount(budget.items, budget.discount);
+    const total = calcTotal(budget.items, budget.discount);
+    const num = `N° ${String(budget.id).padStart(4, "0")}`;
+
+    const itemLines = (budget.items || []).map((it, i) =>
+      `  ${i + 1}. ${it.procedure}${it.tooth && it.tooth !== "-" ? ` (FDI ${it.tooth})` : ""}  x${it.quantity}  ${formatCLP(it.unitPrice)}  →  ${formatCLP(it.quantity * it.unitPrice)}`
+    ).join("\n");
+
+    const discLine = budget.discount > 0 ? `\nDescuento (${budget.discount}%):   -${formatCLP(disc)}` : "";
+
+    const body = `Estimado/a ${p.name},
+
+Junto con saludar, le hacemos llegar el Presupuesto Dental ${num} de Clínica Olimpia.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  PRESUPUESTO DENTAL  ${num}
+  Fecha: ${formatDate(budget.date)}${budget.valid_until ? `   |   Válido hasta: ${formatDate(budget.valid_until)}` : ""}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+PROCEDIMIENTOS:
+${itemLines}
+
+────────────────────────────────
+Subtotal:   ${formatCLP(sub)}${discLine}
+TOTAL:      ${formatCLP(total)}
+────────────────────────────────
+
+${budget.notes ? `Observaciones:\n${budget.notes}\n\n` : ""}Para consultas o agendar su hora, no dude en contactarnos.
+
+Saludos cordiales,
+Dra. María Florencia Muñoz — Cirujano Dentista
+Clínica Olimpia · Arturo Prat 350, Of. 506 · Temuco`;
+
+    const mailto = `mailto:${p.email}?subject=${encodeURIComponent(`Presupuesto Dental ${num} — Clínica Olimpia`)}&body=${encodeURIComponent(body)}`;
+    window.open(mailto, "_blank");
+    if (budget.status === "borrador") updateStatus(budget.id, "enviado");
+  };
+
   // Export PDF
   const exportPDF = (budget) => {
     const p = getPatient(budget.patientId);
@@ -4738,6 +4781,11 @@ function BudgetView({ budgets, setBudgets, patients, treatments, setTreatments }
                   <button onClick={() => setPreview(b)}
                     style={{ background: COLORS.accent + "18", color: COLORS.accent, border: `1px solid ${COLORS.accent}33`, borderRadius: 6, padding: "5px 12px", fontSize: 12, cursor: "pointer", fontWeight: 600 }}>
                     👁 Ver / PDF
+                  </button>
+                  <button onClick={() => sendBudgetEmail(b)}
+                    title={p?.email ? `Enviar a ${p.email}` : "Sin correo registrado"}
+                    style={{ background: p?.email ? "#eff6ff" : COLORS.bg, color: p?.email ? COLORS.accent : COLORS.textDim, border: `1px solid ${p?.email ? COLORS.accent + "44" : COLORS.border}`, borderRadius: 6, padding: "5px 12px", fontSize: 12, cursor: "pointer", fontWeight: 600, display: "flex", alignItems: "center", gap: 4 }}>
+                    ✉️ Enviar correo
                   </button>
                   <button onClick={() => openEdit(b)}
                     style={{ background: COLORS.warning + "15", color: COLORS.warning, border: `1px solid ${COLORS.warning}44`, borderRadius: 6, padding: "5px 12px", fontSize: 12, cursor: "pointer", fontWeight: 600 }}>
@@ -5167,6 +5215,11 @@ function BudgetView({ budgets, setBudgets, patients, treatments, setTreatments }
                 <button onClick={() => exportPDF(preview)}
                   style={{ flex: 1, minWidth: 160, background: COLORS.accent, color: "#fff", border: "none", borderRadius: 8, padding: "11px 16px", fontWeight: 700, cursor: "pointer", fontSize: 14, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
                   📄 Descargar PDF
+                </button>
+                <button onClick={() => sendBudgetEmail(preview)}
+                  title={getPatient(preview.patientId)?.email ? `Enviar a ${getPatient(preview.patientId).email}` : "Sin correo registrado"}
+                  style={{ flex: 1, minWidth: 160, background: "#eff6ff", color: COLORS.accent, border: `1.5px solid ${COLORS.accent}44`, borderRadius: 8, padding: "11px 16px", fontWeight: 700, cursor: "pointer", fontSize: 14, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
+                  ✉️ Enviar por correo
                 </button>
                 <button onClick={() => { setPreview(null); openEdit(preview); }}
                   style={{ background: COLORS.warning + "15", color: COLORS.warning, border: `1px solid ${COLORS.warning}44`, borderRadius: 8, padding: "11px 16px", fontWeight: 700, cursor: "pointer", fontSize: 14 }}>
