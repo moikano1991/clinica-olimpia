@@ -757,7 +757,12 @@ function PatientsView({ patients, setPatients, appointments, treatments, setTrea
     const p = patients.find(pt => pt.id === detail);
     if (!p) { setDetail(null); setSelectedPatient(null); return null; }
     const pAppts = appointments.filter(a => a.patientId === p.id).sort((a, b) => b.date.localeCompare(a.date));
-    const pTreat = treatments.filter(t => t.patientId === p.id).sort((a, b) => b.date.localeCompare(a.date));
+    const statusOrder = { "pendiente pago": 0, planificado: 1, completado: 2 };
+    const pTreat = treatments.filter(t => t.patientId === p.id).sort((a, b) => {
+      const so = (statusOrder[a.status] ?? 1) - (statusOrder[b.status] ?? 1);
+      if (so !== 0) return so;
+      return (b.date || "").localeCompare(a.date || "");
+    });
     const totalDebt = pTreat.filter(t => t.status === "completado" || t.status === "pendiente pago").reduce((s, t) => s + (t.cost - t.paid), 0);
 
     const fields = [
