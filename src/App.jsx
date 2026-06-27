@@ -1228,19 +1228,31 @@ function PatientsView({ patients, setPatients, appointments, treatments, setTrea
 
 // ── Selector FDI / ISO 3950 ──────────────────────────────────────────
 function ToothSelector({ value, onChange }) {
-  // Cuadrantes FDI: 1=Sup.Der, 2=Sup.Izq, 3=Inf.Izq, 4=Inf.Der
-  // Fila superior: Q1 (18→11) | Q2 (21→28)
-  // Fila inferior: Q4 (48→41) | Q3 (31→38)
+  const [showTemp, setShowTemp] = useState(false);
+
+  // Permanentes — Q1–Q4
   const upperLeft  = [18,17,16,15,14,13,12,11];
   const upperRight = [21,22,23,24,25,26,27,28];
   const lowerLeft  = [48,47,46,45,44,43,42,41];
   const lowerRight = [31,32,33,34,35,36,37,38];
 
+  // Temporales (deciduos) — Q5–Q8
+  const tempUpperLeft  = [55,54,53,52,51];
+  const tempUpperRight = [61,62,63,64,65];
+  const tempLowerLeft  = [85,84,83,82,81];
+  const tempLowerRight = [71,72,73,74,75];
+
   const toothName = {
+    // Permanentes
     11:"Inc.C",12:"Inc.L",13:"Can",14:"Pre1",15:"Pre2",16:"Mol1",17:"Mol2",18:"Mol3",
     21:"Inc.C",22:"Inc.L",23:"Can",24:"Pre1",25:"Pre2",26:"Mol1",27:"Mol2",28:"Mol3",
     31:"Inc.C",32:"Inc.L",33:"Can",34:"Pre1",35:"Pre2",36:"Mol1",37:"Mol2",38:"Mol3",
     41:"Inc.C",42:"Inc.L",43:"Can",44:"Pre1",45:"Pre2",46:"Mol1",47:"Mol2",48:"Mol3",
+    // Temporales
+    51:"Inc.C",52:"Inc.L",53:"Can",54:"Mol1",55:"Mol2",
+    61:"Inc.C",62:"Inc.L",63:"Can",64:"Mol1",65:"Mol2",
+    71:"Inc.C",72:"Inc.L",73:"Can",74:"Mol1",75:"Mol2",
+    81:"Inc.C",82:"Inc.L",83:"Can",84:"Mol1",85:"Mol2",
   };
 
   const selected = value && value !== "-" ? value.split(",").map(v => v.trim()).filter(Boolean) : [];
@@ -1251,37 +1263,62 @@ function ToothSelector({ value, onChange }) {
     onChange(next.length ? next.join(",") : "-");
   };
 
-  const Btn = ({ t }) => {
+  const Btn = ({ t, temp }) => {
     const on = selected.includes(String(t));
     return (
       <button type="button" title={`${t} — ${toothName[t]}`} onClick={() => toggle(t)}
-        style={{ width: 26, height: 26, borderRadius: 4, padding: 0, fontSize: 9, fontWeight: 700, cursor: "pointer",
-          border: on ? `2px solid ${COLORS.accent}` : `1px solid ${COLORS.border}`,
-          background: on ? COLORS.accent : COLORS.surface,
+        style={{ width: temp ? 28 : 26, height: temp ? 28 : 26, borderRadius: 4, padding: 0,
+          fontSize: 9, fontWeight: 700, cursor: "pointer",
+          border: on ? `2px solid ${temp ? "#d97706" : COLORS.accent}` : `1px solid ${COLORS.border}`,
+          background: on ? (temp ? "#d97706" : COLORS.accent) : COLORS.surface,
           color: on ? "#fff" : COLORS.text, transition: "all 0.1s" }}>
         {t}
       </button>
     );
   };
 
-  const Row = ({ left, right }) => (
+  const Row = ({ left, right, temp }) => (
     <div style={{ display: "flex", justifyContent: "center", gap: 2 }}>
-      {left.map(t => <Btn key={t} t={t} />)}
+      {left.map(t => <Btn key={t} t={t} temp={temp} />)}
       <div style={{ width: 6, borderLeft: `1px dashed ${COLORS.border}` }} />
-      {right.map(t => <Btn key={t} t={t} />)}
+      {right.map(t => <Btn key={t} t={t} temp={temp} />)}
     </div>
   );
 
   return (
     <div style={{ background: COLORS.bg, border: `1px solid ${COLORS.border}`, borderRadius: 10, padding: "12px 10px" }}>
+      {/* Dientes permanentes */}
       <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: COLORS.textDim, marginBottom: 6, padding: "0 2px" }}>
         <span>D — Derecha px</span>
-        <span style={{ color: COLORS.textMuted, fontWeight: 700, fontSize: 9 }}>FDI / ISO 3950</span>
+        <span style={{ color: COLORS.textMuted, fontWeight: 700, fontSize: 9 }}>FDI / ISO 3950 — Permanentes</span>
         <span>Izquierda px — I</span>
       </div>
       <Row left={upperLeft} right={upperRight} />
       <div style={{ height: 6, borderBottom: `1px dashed ${COLORS.border}`, margin: "3px 0" }} />
       <Row left={lowerLeft} right={lowerRight} />
+
+      {/* Toggle dientes temporales */}
+      <button type="button" onClick={() => setShowTemp(s => !s)}
+        style={{ marginTop: 10, width: "100%", background: showTemp ? "#fef3c7" : COLORS.surface,
+          border: `1px dashed #d97706`, borderRadius: 6, padding: "5px 10px",
+          fontSize: 11, fontWeight: 700, color: "#92400e", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
+        🦷 {showTemp ? "▲ Ocultar" : "▼ Mostrar"} dientes temporales (deciduos)
+      </button>
+
+      {/* Dientes temporales — Q5–Q8 */}
+      {showTemp && (
+        <div style={{ marginTop: 8, background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 8, padding: "10px 8px" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: "#92400e", marginBottom: 6 }}>
+            <span>D — Derecha px</span>
+            <span style={{ fontWeight: 700 }}>Temporales / Deciduos</span>
+            <span>Izquierda px — I</span>
+          </div>
+          <Row left={tempUpperLeft} right={tempUpperRight} temp />
+          <div style={{ height: 6, borderBottom: `1px dashed #fde68a`, margin: "3px 0" }} />
+          <Row left={tempLowerLeft} right={tempLowerRight} temp />
+        </div>
+      )}
+
       {selected.length > 0 ? (
         <div style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
           <span style={{ color: COLORS.accent, fontSize: 13, fontWeight: 700 }}>
