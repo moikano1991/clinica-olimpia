@@ -585,8 +585,9 @@ function PatientsView({ patients, setPatients, appointments, treatments, setTrea
     const costNum = Number(editTreatDet.cost) || 0;
     const paidNum = Number(editTreatDet.paid) || 0;
     const autoStatus = paidNum >= costNum && costNum > 0 ? "completado" : paidNum > 0 ? "pendiente pago" : editTreatDet.status;
+    const autoDate = (!editTreatDet.date && (autoStatus === "completado" || autoStatus === "pendiente pago")) ? today() : editTreatDet.date;
     const { data, error } = await supabase.from("treatments").update({
-      date: editTreatDet.date, procedure: editTreatDet.procedure, tooth: editTreatDet.tooth || "-",
+      date: autoDate, procedure: editTreatDet.procedure, tooth: editTreatDet.tooth || "-",
       cost: costNum, paid: paidNum, status: autoStatus, notes: editTreatDet.notes,
     }).eq("id", editTreatDet.id).select().single();
     if (!error) { setTreatments(prev => prev.map(t => t.id === editTreatDet.id ? toTreat(data) : t)); setEditTreatDet(null); }
@@ -739,8 +740,9 @@ function PatientsView({ patients, setPatients, appointments, treatments, setTrea
     const costNum = Number(treatForm.cost) || 0;
     const paidNum = Number(treatForm.paid) || 0;
     const autoStatus = paidNum >= costNum && costNum > 0 ? "completado" : paidNum > 0 ? "pendiente pago" : treatForm.status;
+    const autoDate = (!treatForm.date && (autoStatus === "completado" || autoStatus === "pendiente pago")) ? today() : (treatForm.date || today());
     const { data, error } = await supabase.from("treatments").insert([{
-      patient_id: patientId, date: treatForm.date, procedure: treatForm.procedure,
+      patient_id: patientId, date: autoDate, procedure: treatForm.procedure,
       tooth: treatForm.tooth || "-", cost: costNum, paid: paidNum,
       status: autoStatus, notes: treatForm.notes,
     }]).select().single();
@@ -909,11 +911,20 @@ function PatientsView({ patients, setPatients, appointments, treatments, setTrea
         </div>
         {pTreat.length === 0 ? <div style={{ color: COLORS.textDim }}>Sin tratamientos registrados</div> : (
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            {pTreat.map(t => (
-              <div key={t.id} style={{ background: COLORS.card, border: `1px solid ${COLORS.border}`, borderRadius: 10, padding: "12px 16px" }}>
+            {pTreat.map(t => {
+              const cardStyle = t.status === "completado"
+                ? { background: "#f0fdf4", border: "1.5px solid #86efac" }
+                : t.status === "pendiente pago"
+                ? { background: "#fefce8", border: "1.5px solid #fde047" }
+                : { background: COLORS.card, border: `1px solid ${COLORS.border}` };
+              return (
+              <div key={t.id} style={{ ...cardStyle, borderRadius: 10, padding: "12px 16px" }}>
                 <div style={{ display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 8, marginBottom: 8 }}>
                   <div>
-                    <div style={{ color: COLORS.text, fontWeight: 600 }}>{formatDate(t.date)} — {t.procedure}</div>
+                    <div style={{ color: COLORS.text, fontWeight: 600 }}>
+                      {t.date ? formatDate(t.date) : <span style={{ color: COLORS.textDim, fontStyle: "italic" }}>Sin fecha</span>}
+                      {" — "}{t.procedure}
+                    </div>
                     {t.tooth && t.tooth !== "-" && <div style={{ color: COLORS.textMuted, fontSize: 12 }}>🦷 FDI {t.tooth}</div>}
                     {t.notes && <div style={{ color: COLORS.textDim, fontSize: 12 }}>{t.notes}</div>}
                   </div>
@@ -934,7 +945,8 @@ function PatientsView({ patients, setPatients, appointments, treatments, setTrea
                   </button>
                 </div>
               </div>
-            ))}
+              );
+            })}
           </div>
         )}
 
