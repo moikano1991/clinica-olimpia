@@ -562,8 +562,8 @@ function PatientsView({ patients, setPatients, appointments, treatments, setTrea
   const [search, setSearch] = useState("");
   const [showForm, setShowForm] = useState(false);
   const [showEditForm, setShowEditForm] = useState(false);
-  const [form, setForm] = useState({ name: "", rut: "", phone: "", email: "", dob: "", address: "", notes: "" });
-  const [editForm, setEditForm] = useState({ name: "", rut: "", phone: "", email: "", dob: "", address: "", notes: "" });
+  const [form, setForm] = useState({ name: "", rut: "", phone: "", email: "", dob: "", address: "", convenio: "", notes: "" });
+  const [editForm, setEditForm] = useState({ name: "", rut: "", phone: "", email: "", dob: "", address: "", convenio: "", notes: "" });
   const [detail, setDetail] = useState(selectedPatient || null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
@@ -629,11 +629,11 @@ function PatientsView({ patients, setPatients, appointments, treatments, setTrea
     if (!form.name) return;
     const { data, error } = await supabase.from("patients").insert([{
       name: form.name, rut: form.rut, phone: form.phone, email: form.email,
-      dob: form.dob, address: form.address, notes: form.notes,
+      dob: form.dob, address: form.address, convenio: form.convenio || "", notes: form.notes,
     }]).select().single();
     if (!error) {
       setPatients(prev => [...prev, data]);
-      setForm({ name: "", rut: "", phone: "", email: "", dob: "", address: "", notes: "" });
+      setForm({ name: "", rut: "", phone: "", email: "", dob: "", address: "", convenio: "", notes: "" });
       setShowForm(false);
     }
   };
@@ -726,7 +726,7 @@ function PatientsView({ patients, setPatients, appointments, treatments, setTrea
     if (!editForm.name) return;
     const { data, error } = await supabase.from("patients").update({
       name: editForm.name, rut: editForm.rut, phone: editForm.phone, email: editForm.email,
-      dob: editForm.dob, address: editForm.address, notes: editForm.notes,
+      dob: editForm.dob, address: editForm.address, convenio: editForm.convenio || "", notes: editForm.notes,
     }).eq("id", id).select().single();
     if (!error) {
       setPatients(prev => prev.map(p => p.id === id ? data : p));
@@ -765,6 +765,7 @@ function PatientsView({ patients, setPatients, appointments, treatments, setTrea
       { label: "Email", key: "email", type: "email" },
       { label: "Fecha de nacimiento", key: "dob", type: "date" },
       { label: "Dirección", key: "address", type: "text" },
+      { label: "Convenio", key: "convenio", type: "text" },
       { label: "Alertas / Alergias", key: "notes", type: "text" },
     ];
 
@@ -781,6 +782,7 @@ function PatientsView({ patients, setPatients, appointments, treatments, setTrea
                 <span>✉️ {p.email}</span>
                 <span>🎂 {formatDate(p.dob)}</span>
                 <span>📍 {p.address}</span>
+                {p.convenio && <span>🏥 Convenio: <strong>{p.convenio}</strong></span>}
               </div>
               {p.notes && <div style={{ marginTop: 10, background: COLORS.warning + "11", border: `1px solid ${COLORS.warning}33`, borderRadius: 8, padding: "8px 12px", color: COLORS.warning, fontSize: 13 }}>⚠️ {p.notes}</div>}
             </div>
@@ -789,7 +791,7 @@ function PatientsView({ patients, setPatients, appointments, treatments, setTrea
                 <div style={{ color: COLORS.textMuted, fontSize: 12 }}>Saldo pendiente</div>
                 <div style={{ color: totalDebt > 0 ? COLORS.danger : COLORS.success, fontWeight: 700, fontSize: 24 }}>{formatCLP(totalDebt)}</div>
               </div>
-              <button onClick={() => { setEditForm({ name: p.name, rut: p.rut || "", phone: p.phone || "", email: p.email || "", dob: p.dob || "", address: p.address || "", notes: p.notes || "" }); setShowEditForm(true); }}
+              <button onClick={() => { setEditForm({ name: p.name, rut: p.rut || "", phone: p.phone || "", email: p.email || "", dob: p.dob || "", address: p.address || "", convenio: p.convenio || "", notes: p.notes || "" }); setShowEditForm(true); }}
                 style={{ background: COLORS.accent + "22", color: COLORS.accent, border: `1px solid ${COLORS.accent}44`, borderRadius: 8, padding: "6px 14px", fontSize: 13, cursor: "pointer", fontWeight: 600 }}>
                 ✏️ Editar
               </button>
@@ -1187,6 +1189,7 @@ function PatientsView({ patients, setPatients, appointments, treatments, setTrea
                 { label: "Email", key: "email", type: "email" },
                 { label: "Fecha de nacimiento", key: "dob", type: "date" },
                 { label: "Dirección", key: "address", type: "text" },
+                { label: "Convenio", key: "convenio", type: "text" },
                 { label: "Alertas / Alergias", key: "notes", type: "text" },
               ].map(f => (
                 <div key={f.key}>
@@ -1197,7 +1200,7 @@ function PatientsView({ patients, setPatients, appointments, treatments, setTrea
             </div>
             <div style={{ display: "flex", gap: 10, marginTop: 20 }}>
               <button onClick={savePatient} style={{ flex: 1, background: COLORS.accent, color: "#fff", border: "none", borderRadius: 8, padding: "10px", fontWeight: 700, cursor: "pointer" }}>Guardar</button>
-              <button onClick={() => { setShowForm(false); setForm({ name: "", rut: "", phone: "", email: "", dob: "", address: "", notes: "" }); }} style={{ flex: 1, background: COLORS.card, color: COLORS.textMuted, border: `1px solid ${COLORS.border}`, borderRadius: 8, padding: "10px", cursor: "pointer" }}>Cancelar</button>
+              <button onClick={() => { setShowForm(false); setForm({ name: "", rut: "", phone: "", email: "", dob: "", address: "", convenio: "", notes: "" }); }} style={{ flex: 1, background: COLORS.card, color: COLORS.textMuted, border: `1px solid ${COLORS.border}`, borderRadius: 8, padding: "10px", cursor: "pointer" }}>Cancelar</button>
             </div>
           </div>
         </div>
