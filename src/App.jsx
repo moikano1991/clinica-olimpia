@@ -636,7 +636,7 @@ function PatientsView({ patients, setPatients, appointments, treatments, setTrea
       setPatients(prev => [...prev, data]);
       setForm({ name: "", rut: "", phone: "", email: "", dob: "", address: "", convenio: "", notes: "" });
       setShowForm(false);
-    }
+    } else alert("Error guardando paciente: " + error.message);
   };
 
   const parseWhatsApp = (text) => {
@@ -732,7 +732,7 @@ function PatientsView({ patients, setPatients, appointments, treatments, setTrea
     if (!error) {
       setPatients(prev => prev.map(p => p.id === id ? data : p));
       setShowEditForm(false);
-    }
+    } else alert("Error guardando cambios: " + error.message);
   };
 
   const saveTreatFromDetail = async (patientId) => {
