@@ -4503,14 +4503,22 @@ function BudgetView({ budgets, setBudgets, patients, treatments, setTreatments }
     setNewItem({ procedure: "Limpieza dental", tooth: "-", quantity: 1, unitPrice: "" });
   };
 
+  // Si el usuario escribió el nombre completo pero no alcanzó a hacer clic en la sugerencia, intenta resolverlo igual
+  const resolvePatientId = (patientId, search) => {
+    if (patientId) return patientId;
+    const q = search.trim().toLowerCase();
+    if (!q) return "";
+    const match = patients.find(p => p.name?.trim().toLowerCase() === q);
+    return match ? String(match.id) : "";
+  };
+
   // Save budget to Supabase
   const saveBudget = async () => {
-    if (!form.patientId || form.items.length === 0) {
-      alert("Selecciona un paciente y agrega al menos un ítem.");
-      return;
-    }
+    const resolvedId = resolvePatientId(form.patientId, patSearch);
+    if (!resolvedId) { alert("Selecciona un paciente de la lista de sugerencias (haz clic sobre su nombre)."); return; }
+    if (form.items.length === 0) { alert("Agrega al menos un procedimiento con el botón \"+\" antes de guardar."); return; }
     const { data, error } = await supabase.from("budgets").insert([{
-      patient_id: Number(form.patientId), date: form.date,
+      patient_id: Number(resolvedId), date: form.date,
       valid_until: form.validUntil || null, items: form.items,
       discount: Number(form.discount) || 0, notes: form.notes, status: form.status,
     }]).select().single();
@@ -4568,12 +4576,11 @@ function BudgetView({ budgets, setBudgets, patients, treatments, setTreatments }
   };
 
   const saveEdit = async () => {
-    if (!editForm.patientId || editForm.items.length === 0) {
-      alert("Selecciona un paciente y agrega al menos un ítem.");
-      return;
-    }
+    const resolvedEditId = resolvePatientId(editForm.patientId, editPatSearch);
+    if (!resolvedEditId) { alert("Selecciona un paciente de la lista de sugerencias (haz clic sobre su nombre)."); return; }
+    if (editForm.items.length === 0) { alert("Agrega al menos un procedimiento con el botón \"+\" antes de guardar."); return; }
     const { data, error } = await supabase.from("budgets").update({
-      patient_id: Number(editForm.patientId),
+      patient_id: Number(resolvedEditId),
       date: editForm.date,
       valid_until: editForm.validUntil || null,
       items: editForm.items,
