@@ -3,6 +3,7 @@ import { supabase } from "./supabase";
 import * as XLSX from "xlsx";
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
+import QRCode from "qrcode";
 
 const COLORS = {
   bg: "#f0f4f8",
@@ -22,6 +23,8 @@ const COLORS = {
   textMuted: "#64748b",
   textDim: "#94a3b8",
 };
+
+const SITE_URL = "https://moikano1991.github.io/clinica-olimpia/";
 
 const toAppt = (r) => ({ ...r, patientId: r.patient_id });
 const toTreat = (r) => ({ ...r, patientId: r.patient_id });
@@ -3739,6 +3742,81 @@ function RegistroView() {
   );
 }
 
+const RECEIPT_PAYMENT_LABEL = { efectivo: "Efectivo", debito: "Tarjeta de Débito", credito: "Tarjeta de Crédito" };
+
+function VerificarView() {
+  const [status, setStatus] = useState("loading"); // loading | found | notfound
+  const [receipt, setReceipt] = useState(null);
+  const [patient, setPatient] = useState(null);
+
+  useEffect(() => {
+    const code = decodeURIComponent(window.location.hash.split("=")[1] || "").trim();
+    if (!code) { setStatus("notfound"); return; }
+    (async () => {
+      const { data, error } = await supabase.from("receipts").select("*").eq("code", code).maybeSingle();
+      if (error || !data) { setStatus("notfound"); return; }
+      setReceipt(data);
+      if (data.patient_id) {
+        const { data: pat } = await supabase.from("patients").select("name, rut").eq("id", data.patient_id).maybeSingle();
+        setPatient(pat || null);
+      }
+      setStatus("found");
+    })();
+  }, []);
+
+  if (status === "loading") return (
+    <div style={{ minHeight: "100vh", background: COLORS.bg, display: "flex", alignItems: "center", justifyContent: "center" }}>
+      <div style={{ color: COLORS.textMuted, fontSize: 14 }}>Verificando documento…</div>
+    </div>
+  );
+
+  if (status === "notfound") return (
+    <div style={{ minHeight: "100vh", background: COLORS.bg, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+      <div style={{ background: COLORS.surface, border: `2px solid ${COLORS.danger}44`, borderRadius: 20, padding: 40, width: "100%", maxWidth: 420, textAlign: "center" }}>
+        <div style={{ fontSize: 56, marginBottom: 16 }}>❌</div>
+        <h2 style={{ color: COLORS.danger, margin: "0 0 10px" }}>Documento no válido</h2>
+        <p style={{ color: COLORS.textMuted, fontSize: 14, margin: 0 }}>No encontramos ningún certificado con este código. Verifica el enlace o contacta directamente a Clínica Olimpia.</p>
+        <div style={{ marginTop: 20, color: COLORS.textDim, fontSize: 12 }}>🦷 Clínica Estética y Dental Olimpia · Arturo Prat 350, Of. 506, Temuco</div>
+      </div>
+    </div>
+  );
+
+  return (
+    <div style={{ minHeight: "100vh", background: COLORS.bg, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+      <div style={{ background: COLORS.surface, border: `2px solid ${COLORS.success}55`, borderRadius: 20, padding: 36, width: "100%", maxWidth: 460 }}>
+        <div style={{ textAlign: "center", marginBottom: 22 }}>
+          <div style={{ fontSize: 52, marginBottom: 6 }}>✅</div>
+          <div style={{ fontWeight: 800, fontSize: 20, color: COLORS.success }}>Documento Auténtico</div>
+          <div style={{ fontSize: 12, color: COLORS.textDim, marginTop: 4 }}>Certificado de Recepción de Dinero · Clínica Olimpia</div>
+        </div>
+
+        <div style={{ display: "flex", flexDirection: "column", gap: 12, background: COLORS.bg, borderRadius: 12, padding: "16px 18px" }}>
+          {[
+            ["Paciente", patient?.name || "—"],
+            ["RUT", patient?.rut || "—"],
+            ["Monto recibido", formatCLP(receipt.amount)],
+            ["Medio de pago", RECEIPT_PAYMENT_LABEL[receipt.payment_method] || receipt.payment_method],
+            ["N° de boleta", receipt.receipt_number],
+            ["Concepto", receipt.concept],
+            ["Fecha", formatDate(receipt.date)],
+            ["Emitido por", receipt.professional],
+            ["Código", receipt.code],
+          ].map(([label, value]) => (
+            <div key={label} style={{ display: "flex", justifyContent: "space-between", gap: 12, fontSize: 13, borderBottom: `1px solid ${COLORS.border}`, paddingBottom: 8 }}>
+              <span style={{ color: COLORS.textMuted, fontWeight: 600 }}>{label}</span>
+              <span style={{ color: COLORS.text, fontWeight: 700, textAlign: "right" }}>{value}</span>
+            </div>
+          ))}
+        </div>
+
+        <div style={{ marginTop: 20, textAlign: "center", fontSize: 11, color: COLORS.textDim }}>
+          🦷 Clínica Estética y Dental Olimpia · Arturo Prat 350, Of. 506, Temuco
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function LoginView({ onLogin }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -4751,13 +4829,36 @@ Clínica Olimpia · Arturo Prat 350, Of. 506 · Temuco`;
 
   const PAYMENT_METHOD_LABEL = { efectivo: "Efectivo", debito: "Tarjeta de Débito", credito: "Tarjeta de Crédito" };
 
-  // Exportar certificado de recepción de dinero en PDF
-  const exportReceiptPDF = () => {
+  // Exportar certificado de recepción de dinero en PDF (con QR verificable)
+  const exportReceiptPDF = async () => {
     if (!receiptBudget) return;
     const p = getPatient(receiptBudget.patientId);
     const amountNum = Number(receiptForm.amount) || 0;
     if (amountNum <= 0) { alert("Ingresa el monto recibido."); return; }
     if (!receiptForm.receiptNumber) { alert("Ingresa el número de boleta asociado."); return; }
+
+    // Código único de verificación
+    const rawId = (typeof crypto !== "undefined" && crypto.randomUUID) ? crypto.randomUUID() : `${Date.now()}${Math.random()}`;
+    const code = `OL-${rawId.replace(/-/g, "").slice(0, 8).toUpperCase()}`;
+
+    // Guardar el certificado en Supabase para que sea verificable
+    const { error: saveError } = await supabase.from("receipts").insert([{
+      code,
+      patient_id: Number(receiptBudget.patientId),
+      budget_id: receiptBudget.id || null,
+      amount: amountNum,
+      payment_method: receiptForm.paymentMethod,
+      receipt_number: receiptForm.receiptNumber,
+      concept: receiptForm.concept || "Tratamiento dental",
+      date: receiptForm.date,
+    }]);
+    if (saveError) { alert("Error guardando el certificado: " + saveError.message); return; }
+
+    // Generar QR que apunta a la página de verificación pública
+    const verifyUrl = `${SITE_URL}#verificar=${code}`;
+    let qrDataUrl = "";
+    try { qrDataUrl = await QRCode.toDataURL(verifyUrl, { margin: 1, width: 240 }); }
+    catch (e) { console.error("Error generando QR:", e); }
 
     const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
 
@@ -4826,29 +4927,40 @@ Clínica Olimpia · Arturo Prat 350, Of. 506 · Temuco`;
     doc.setTextColor(100, 116, 139);
     doc.text("Este documento certifica la recepción del pago indicado y no reemplaza la boleta o factura tributaria emitida.", 20, y, { maxWidth: 170 });
 
-    // Zona de timbre y firma
-    const boxY = 210;
+    // Zona de timbre, QR de verificación y firma
+    const boxY = 195;
     doc.setDrawColor(200, 210, 220);
     doc.setLineWidth(0.3);
 
     // Timbre (cuadro punteado)
     doc.setLineDashPattern([1.5, 1.5], 0);
-    doc.rect(20, boxY, 60, 40);
+    doc.rect(20, boxY, 42, 40);
     doc.setLineDashPattern([], 0);
     doc.setFontSize(9);
     doc.setTextColor(148, 163, 184);
-    doc.text("TIMBRE", 50, boxY + 22, { align: "center" });
+    doc.text("TIMBRE", 41, boxY + 22, { align: "center" });
+
+    // QR de verificación
+    if (qrDataUrl) doc.addImage(qrDataUrl, "PNG", 78, boxY, 32, 32);
+    doc.setFontSize(7);
+    doc.setFont("helvetica", "normal");
+    doc.setTextColor(100, 116, 139);
+    doc.text("Escanee para verificar", 94, boxY + 36, { align: "center" });
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(8);
+    doc.setTextColor(30, 41, 59);
+    doc.text(code, 94, boxY + 41, { align: "center" });
 
     // Firma (línea sólida)
     doc.setDrawColor(100, 116, 139);
-    doc.line(115, boxY + 30, 190, boxY + 30);
+    doc.line(133, boxY + 30, 190, boxY + 30);
     doc.setTextColor(30, 41, 59);
     doc.setFontSize(9);
     doc.setFont("helvetica", "bold");
-    doc.text("Dra. María Florencia Muñoz", 152, boxY + 36, { align: "center" });
+    doc.text("Dra. María Florencia Muñoz", 161, boxY + 36, { align: "center" });
     doc.setFont("helvetica", "normal");
     doc.setTextColor(100, 116, 139);
-    doc.text("Firma profesional", 152, boxY + 41, { align: "center" });
+    doc.text("Firma profesional", 161, boxY + 41, { align: "center" });
 
     // Footer
     doc.setFillColor(240, 244, 248);
@@ -4856,7 +4968,7 @@ Clínica Olimpia · Arturo Prat 350, Of. 506 · Temuco`;
     doc.setFontSize(8);
     doc.setFont("helvetica", "italic");
     doc.setTextColor(148, 163, 184);
-    doc.text("Clínica Olimpia · Arturo Prat 350, Of. 506 · Temuco", 105, 291, { align: "center" });
+    doc.text(`Verifique este documento en ${SITE_URL}#verificar=${code}`, 105, 291, { align: "center" });
 
     doc.save(`Certificado_Pago_${p?.name?.replace(/ /g, "_") || "Paciente"}_${receiptForm.date}.pdf`);
     setReceiptBudget(null);
@@ -5500,6 +5612,8 @@ Clínica Olimpia · Arturo Prat 350, Of. 506 · Temuco`;
 export default function App() {
   // Mostrar formulario público si la URL tiene #registro
   if (window.location.hash === "#registro") return <RegistroView />;
+  // Mostrar verificación pública de certificados si la URL tiene #verificar=CODIGO
+  if (window.location.hash.startsWith("#verificar=")) return <VerificarView />;
 
   const [view, setView] = useState("dashboard");
   const [patients, setPatients] = useState([]);
