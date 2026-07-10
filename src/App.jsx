@@ -4386,6 +4386,10 @@ function BudgetView({ budgets, setBudgets, patients, treatments, setTreatments }
   // Preview state
   const [preview, setPreview] = useState(null); // budget object
 
+  // Certificado de recepción de dinero
+  const [receiptBudget, setReceiptBudget] = useState(null); // budget al que se asocia
+  const [receiptForm, setReceiptForm] = useState({ amount: "", paymentMethod: "efectivo", receiptNumber: "", date: today(), concept: "" });
+
   // Edit state
   const [showEditForm, setShowEditForm] = useState(false);
   const [editId, setEditId] = useState(null);
@@ -4731,6 +4735,133 @@ Clínica Olimpia · Arturo Prat 350, Of. 506 · Temuco`;
     doc.save(`Presupuesto_${p?.name?.replace(/ /g, "_") || "Paciente"}_${budget.date}.pdf`);
   };
 
+  // Abrir modal de certificado pre-llenado desde un presupuesto
+  const openReceipt = (budget) => {
+    const total = calcTotal(budget.items || [], budget.discount || 0);
+    const procList = (budget.items || []).map(it => it.procedure).join(", ");
+    setReceiptBudget(budget);
+    setReceiptForm({
+      amount: String(total),
+      paymentMethod: "efectivo",
+      receiptNumber: "",
+      date: today(),
+      concept: procList || "Tratamiento dental",
+    });
+  };
+
+  const PAYMENT_METHOD_LABEL = { efectivo: "Efectivo", debito: "Tarjeta de Débito", credito: "Tarjeta de Crédito" };
+
+  // Exportar certificado de recepción de dinero en PDF
+  const exportReceiptPDF = () => {
+    if (!receiptBudget) return;
+    const p = getPatient(receiptBudget.patientId);
+    const amountNum = Number(receiptForm.amount) || 0;
+    if (amountNum <= 0) { alert("Ingresa el monto recibido."); return; }
+    if (!receiptForm.receiptNumber) { alert("Ingresa el número de boleta asociado."); return; }
+
+    const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+
+    // Header
+    doc.setFillColor(30, 58, 110);
+    doc.rect(0, 0, 210, 34, "F");
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(20);
+    doc.setFont("helvetica", "bold");
+    doc.text("Clínica Olimpia", 14, 15);
+    doc.setFontSize(9);
+    doc.setFont("helvetica", "normal");
+    doc.text("Arturo Prat 350, Of. 506 · Temuco, La Araucanía", 14, 22);
+    doc.text("Dra. María Florencia Muñoz · Cirujano Dentista", 14, 28);
+
+    // Título
+    doc.setTextColor(30, 58, 110);
+    doc.setFontSize(17);
+    doc.setFont("helvetica", "bold");
+    doc.text("CERTIFICADO DE RECEPCIÓN DE DINERO", 105, 48, { align: "center" });
+    doc.setDrawColor(37, 99, 235);
+    doc.setLineWidth(0.6);
+    doc.line(45, 52, 165, 52);
+
+    doc.setFontSize(9);
+    doc.setFont("helvetica", "normal");
+    doc.setTextColor(100, 116, 139);
+    doc.text(`Fecha: ${formatDate(receiptForm.date)}`, 196, 62, { align: "right" });
+
+    // Cuerpo — texto tipo declaración
+    let y = 74;
+    doc.setFontSize(11);
+    doc.setTextColor(30, 41, 59);
+    doc.setFont("helvetica", "normal");
+
+    const bodyLine = (label, value) => {
+      doc.setFont("helvetica", "bold");
+      doc.text(label, 20, y);
+      doc.setFont("helvetica", "normal");
+      const labelW = doc.getTextWidth(label);
+      doc.text(value, 20 + labelW + 2, y);
+      y += 10;
+    };
+
+    doc.text("Se certifica haber recibido de:", 20, y);
+    y += 10;
+    bodyLine("Paciente:", p?.name || "—");
+    if (p?.rut) bodyLine("RUT:", p.rut);
+    bodyLine("La suma de:", formatCLP(amountNum));
+
+    // Concepto (multi-línea)
+    doc.setFont("helvetica", "bold");
+    doc.text("Por concepto de:", 20, y);
+    doc.setFont("helvetica", "normal");
+    const conceptLines = doc.splitTextToSize(receiptForm.concept || "Tratamiento dental", 165);
+    doc.text(conceptLines, 20, y + 7);
+    y += 7 + conceptLines.length * 6 + 6;
+
+    bodyLine("Medio de pago:", PAYMENT_METHOD_LABEL[receiptForm.paymentMethod]);
+    bodyLine("N° de boleta asociado:", receiptForm.receiptNumber);
+    if (receiptBudget.id) bodyLine("Presupuesto asociado:", `N° ${String(receiptBudget.id).padStart(4, "0")}`);
+
+    y += 6;
+    doc.setFontSize(9);
+    doc.setFont("helvetica", "italic");
+    doc.setTextColor(100, 116, 139);
+    doc.text("Este documento certifica la recepción del pago indicado y no reemplaza la boleta o factura tributaria emitida.", 20, y, { maxWidth: 170 });
+
+    // Zona de timbre y firma
+    const boxY = 210;
+    doc.setDrawColor(200, 210, 220);
+    doc.setLineWidth(0.3);
+
+    // Timbre (cuadro punteado)
+    doc.setLineDashPattern([1.5, 1.5], 0);
+    doc.rect(20, boxY, 60, 40);
+    doc.setLineDashPattern([], 0);
+    doc.setFontSize(9);
+    doc.setTextColor(148, 163, 184);
+    doc.text("TIMBRE", 50, boxY + 22, { align: "center" });
+
+    // Firma (línea sólida)
+    doc.setDrawColor(100, 116, 139);
+    doc.line(115, boxY + 30, 190, boxY + 30);
+    doc.setTextColor(30, 41, 59);
+    doc.setFontSize(9);
+    doc.setFont("helvetica", "bold");
+    doc.text("Dra. María Florencia Muñoz", 152, boxY + 36, { align: "center" });
+    doc.setFont("helvetica", "normal");
+    doc.setTextColor(100, 116, 139);
+    doc.text("Firma profesional", 152, boxY + 41, { align: "center" });
+
+    // Footer
+    doc.setFillColor(240, 244, 248);
+    doc.rect(0, 282, 210, 15, "F");
+    doc.setFontSize(8);
+    doc.setFont("helvetica", "italic");
+    doc.setTextColor(148, 163, 184);
+    doc.text("Clínica Olimpia · Arturo Prat 350, Of. 506 · Temuco", 105, 291, { align: "center" });
+
+    doc.save(`Certificado_Pago_${p?.name?.replace(/ /g, "_") || "Paciente"}_${receiptForm.date}.pdf`);
+    setReceiptBudget(null);
+  };
+
   // Filtered list
   const filtered = [...budgets]
     .filter(b => {
@@ -4828,6 +4959,10 @@ Clínica Olimpia · Arturo Prat 350, Of. 506 · Temuco`;
                     title={p?.email ? `Enviar a ${p.email}` : "Sin correo registrado"}
                     style={{ background: p?.email ? "#eff6ff" : COLORS.bg, color: p?.email ? COLORS.accent : COLORS.textDim, border: `1px solid ${p?.email ? COLORS.accent + "44" : COLORS.border}`, borderRadius: 6, padding: "5px 12px", fontSize: 12, cursor: "pointer", fontWeight: 600, display: "flex", alignItems: "center", gap: 4 }}>
                     ✉️ Enviar correo
+                  </button>
+                  <button onClick={() => openReceipt(b)}
+                    style={{ background: "#f5f3ff", color: "#7c3aed", border: "1px solid #7c3aed44", borderRadius: 6, padding: "5px 12px", fontSize: 12, cursor: "pointer", fontWeight: 600, display: "flex", alignItems: "center", gap: 4 }}>
+                    🧾 Certificado de pago
                   </button>
                   <button onClick={() => openEdit(b)}
                     style={{ background: COLORS.warning + "15", color: COLORS.warning, border: `1px solid ${COLORS.warning}44`, borderRadius: 6, padding: "5px 12px", fontSize: 12, cursor: "pointer", fontWeight: 600 }}>
@@ -5263,6 +5398,10 @@ Clínica Olimpia · Arturo Prat 350, Of. 506 · Temuco`;
                   style={{ flex: 1, minWidth: 160, background: "#eff6ff", color: COLORS.accent, border: `1.5px solid ${COLORS.accent}44`, borderRadius: 8, padding: "11px 16px", fontWeight: 700, cursor: "pointer", fontSize: 14, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
                   ✉️ Enviar por correo
                 </button>
+                <button onClick={() => openReceipt(preview)}
+                  style={{ flex: 1, minWidth: 160, background: "#f5f3ff", color: "#7c3aed", border: "1.5px solid #7c3aed44", borderRadius: 8, padding: "11px 16px", fontWeight: 700, cursor: "pointer", fontSize: 14, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
+                  🧾 Certificado de pago
+                </button>
                 <button onClick={() => { setPreview(null); openEdit(preview); }}
                   style={{ background: COLORS.warning + "15", color: COLORS.warning, border: `1px solid ${COLORS.warning}44`, borderRadius: 8, padding: "11px 16px", fontWeight: 700, cursor: "pointer", fontSize: 14 }}>
                   ✏️ Editar
@@ -5288,6 +5427,72 @@ Clínica Olimpia · Arturo Prat 350, Of. 506 · Temuco`;
           </div>
         </div>
       )}
+
+      {/* ── MODAL CERTIFICADO DE RECEPCIÓN DE DINERO ─────────────── */}
+      {receiptBudget && (() => {
+        const p = getPatient(receiptBudget.patientId);
+        return (
+          <div style={{ position: "fixed", inset: 0, background: "#00000088", zIndex: 210, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+            <div style={{ background: COLORS.surface, border: `1px solid ${COLORS.border}`, borderRadius: 18, padding: 28, width: "100%", maxWidth: 480, maxHeight: "92vh", overflowY: "auto" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18 }}>
+                <h3 style={{ color: COLORS.text, margin: 0 }}>🧾 Certificado de Recepción de Dinero</h3>
+                <button onClick={() => setReceiptBudget(null)} style={{ background: "none", border: "none", color: COLORS.textMuted, cursor: "pointer", fontSize: 22 }}>×</button>
+              </div>
+
+              {/* Paciente */}
+              <div style={{ background: "#f5f3ff", border: "1px solid #7c3aed33", borderRadius: 10, padding: "10px 14px", marginBottom: 16, display: "flex", alignItems: "center", gap: 10 }}>
+                <span style={{ fontSize: 18 }}>👤</span>
+                <div>
+                  <div style={{ color: "#7c3aed", fontSize: 11, fontWeight: 700 }}>PACIENTE</div>
+                  <div style={{ color: COLORS.text, fontWeight: 700, fontSize: 14 }}>{p?.name || "—"}</div>
+                  {p?.rut && <div style={{ color: COLORS.textMuted, fontSize: 12 }}>{p.rut}</div>}
+                </div>
+              </div>
+
+              <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+                <div>
+                  <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>Fecha</label>
+                  <input type="date" value={receiptForm.date} onChange={e => setReceiptForm(f => ({ ...f, date: e.target.value }))} style={inputStyle} />
+                </div>
+                <div>
+                  <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>Monto recibido ($) *</label>
+                  <input type="number" value={receiptForm.amount} onChange={e => setReceiptForm(f => ({ ...f, amount: e.target.value }))} placeholder="0" style={inputStyle} />
+                </div>
+                <div>
+                  <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>Medio de pago *</label>
+                  <select value={receiptForm.paymentMethod} onChange={e => setReceiptForm(f => ({ ...f, paymentMethod: e.target.value }))} style={inputStyle}>
+                    <option value="efectivo">💵 Efectivo</option>
+                    <option value="debito">💳 Tarjeta de Débito</option>
+                    <option value="credito">💳 Tarjeta de Crédito</option>
+                  </select>
+                </div>
+                <div>
+                  <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>N° de boleta asociado *</label>
+                  <input value={receiptForm.receiptNumber} onChange={e => setReceiptForm(f => ({ ...f, receiptNumber: e.target.value }))} placeholder="Ej: 1024" style={inputStyle} />
+                </div>
+                <div>
+                  <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>Concepto</label>
+                  <textarea value={receiptForm.concept} onChange={e => setReceiptForm(f => ({ ...f, concept: e.target.value }))}
+                    rows={2} style={{ ...inputStyle, resize: "vertical", fontFamily: "inherit" }} />
+                </div>
+              </div>
+
+              <div style={{ background: COLORS.bg, border: `1px dashed ${COLORS.border}`, borderRadius: 8, padding: "8px 12px", marginTop: 14, fontSize: 11, color: COLORS.textDim }}>
+                El PDF incluye una zona reservada para <strong>timbre</strong> y <strong>firma del profesional</strong>.
+              </div>
+
+              <div style={{ display: "flex", gap: 10, marginTop: 20 }}>
+                <button onClick={exportReceiptPDF} style={{ flex: 1, background: "#7c3aed", color: "#fff", border: "none", borderRadius: 8, padding: "12px", fontWeight: 700, cursor: "pointer", fontSize: 15 }}>
+                  📄 Generar certificado PDF
+                </button>
+                <button onClick={() => setReceiptBudget(null)} style={{ flex: 1, background: COLORS.card, color: COLORS.textMuted, border: `1px solid ${COLORS.border}`, borderRadius: 8, padding: "12px", cursor: "pointer" }}>
+                  Cancelar
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }
