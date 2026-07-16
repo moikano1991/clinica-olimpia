@@ -2528,9 +2528,28 @@ function EndodonciaView({ cases, setCases, patients }) {
 // ═══════════════════════════════════════════════════════
 // ORTODONCIA
 // ═══════════════════════════════════════════════════════
-function OrtodonciaView({ cases, setCases, patients }) {
+function OrtodonciaView({ cases, setCases, patients, setPatients }) {
   const toOrtho = (r) => ({ ...r, patientId: r.patient_id, controls: r.controls || [], payments: r.payments || [] });
   const getPatient = (id) => patients.find(p => p.id === Number(id));
+
+  const [showNewPatient, setShowNewPatient] = useState(false);
+  const [newPatientForm, setNewPatientForm] = useState({ name: "", rut: "", phone: "", dob: "" });
+
+  const createPatient = async () => {
+    if (!newPatientForm.name.trim()) return;
+    const { data, error } = await supabase.from("patients").insert([{
+      name: newPatientForm.name, rut: newPatientForm.rut, phone: newPatientForm.phone,
+      dob: newPatientForm.dob || null, origin: "orthodontics",
+    }]).select().single();
+    if (!error) {
+      setPatients(prev => [...prev, data]);
+      setForm(f => ({ ...f, patientId: String(data.id) }));
+      setPatSearch(data.name);
+      setPatSugg([]);
+      setShowNewPatient(false);
+      setNewPatientForm({ name: "", rut: "", phone: "", dob: "" });
+    } else alert("Error creando paciente: " + error.message);
+  };
 
   const ORTHO_ITEMS = [
     { value: "inst_superior", label: "Instalación Superior",  icon: "⬆️" },
@@ -3065,6 +3084,24 @@ function OrtodonciaView({ cases, setCases, patients }) {
                         {p.rut && <span style={{ color: COLORS.textMuted, fontSize: 12 }}>{p.rut}</span>}
                       </div>
                     ))}
+                  </div>
+                )}
+                <button type="button" onClick={() => setShowNewPatient(s => !s)}
+                  style={{ background: "none", border: "none", color: COLORS.accent, fontSize: 12, fontWeight: 600, cursor: "pointer", padding: "6px 0 0" }}>
+                  {showNewPatient ? "× Cancelar" : "+ Crear paciente nuevo"}
+                </button>
+                {showNewPatient && (
+                  <div style={{ background: COLORS.bg, borderRadius: 10, padding: 12, marginTop: 8, display: "flex", flexDirection: "column", gap: 8 }}>
+                    <input value={newPatientForm.name} onChange={e => setNewPatientForm(f => ({ ...f, name: e.target.value }))} placeholder="Nombre completo *" style={inputStyle} />
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                      <input value={newPatientForm.rut} onChange={e => setNewPatientForm(f => ({ ...f, rut: e.target.value }))} placeholder="RUT" style={inputStyle} />
+                      <input value={newPatientForm.phone} onChange={e => setNewPatientForm(f => ({ ...f, phone: e.target.value }))} placeholder="Teléfono" style={inputStyle} />
+                    </div>
+                    <input type="date" value={newPatientForm.dob} onChange={e => setNewPatientForm(f => ({ ...f, dob: e.target.value }))} style={inputStyle} />
+                    <button type="button" onClick={createPatient} disabled={!newPatientForm.name.trim()}
+                      style={{ background: !newPatientForm.name.trim() ? COLORS.textDim : COLORS.accent, color: "#fff", border: "none", borderRadius: 8, padding: "9px", fontWeight: 700, cursor: "pointer", fontSize: 13 }}>
+                      Guardar paciente
+                    </button>
                   </div>
                 )}
               </div>
@@ -3817,6 +3854,11 @@ function VerificarView() {
   );
 }
 
+// Usuarios con acceso restringido: mapean un nombre de usuario simple a su correo real de Supabase Auth
+const USERNAME_LOGINS = {
+  ortodoncia: "ortodoncia@clinicaolimpia.cl",
+};
+
 function LoginView({ onLogin }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -3827,8 +3869,10 @@ function LoginView({ onLogin }) {
     e.preventDefault();
     setLoading(true);
     setError("");
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
-    if (error) { setError("Email o contraseña incorrectos"); setLoading(false); }
+    const key = email.trim().toLowerCase();
+    const realEmail = USERNAME_LOGINS[key] || email;
+    const { error } = await supabase.auth.signInWithPassword({ email: realEmail, password });
+    if (error) { setError("Usuario o contraseña incorrectos"); setLoading(false); }
     else onLogin();
   };
 
@@ -3842,8 +3886,8 @@ function LoginView({ onLogin }) {
         </div>
         <form onSubmit={handleLogin} style={{ display: "flex", flexDirection: "column", gap: 16 }}>
           <div>
-            <label style={{ color: COLORS.textMuted, fontSize: 13, fontWeight: 600, display: "block", marginBottom: 6 }}>Correo electrónico</label>
-            <input type="email" value={email} onChange={e => setEmail(e.target.value)} style={{ ...inputStyle, fontSize: 15, padding: "11px 14px" }} required autoFocus placeholder="correo@clinica.cl" />
+            <label style={{ color: COLORS.textMuted, fontSize: 13, fontWeight: 600, display: "block", marginBottom: 6 }}>Usuario</label>
+            <input type="text" value={email} onChange={e => setEmail(e.target.value)} style={{ ...inputStyle, fontSize: 15, padding: "11px 14px" }} required autoFocus placeholder="correo@clinica.cl" />
           </div>
           <div>
             <label style={{ color: COLORS.textMuted, fontSize: 13, fontWeight: 600, display: "block", marginBottom: 6 }}>Contraseña</label>
@@ -5634,6 +5678,7 @@ export default function App() {
   const [selectedPatient, setSelectedPatient] = useState(null);
   const [loading, setLoading] = useState(true);
   const [session, setSession] = useState(null);
+  const [role, setRole] = useState("admin");
   const [copied, setCopied] = useState(false);
   const [agendaConfig, setAgendaConfig] = useState({ filter: "", date: today() });
   const [gcalConnected, setGcalConnected] = useState(false);
@@ -5646,15 +5691,22 @@ export default function App() {
     setTimeout(() => setCopied(false), 2000);
   };
 
+  const loadRole = async (session) => {
+    if (!session) { setRole("admin"); return; }
+    const { data } = await supabase.from("profiles").select("role").eq("id", session.user.id).maybeSingle();
+    setRole(data?.role || "admin");
+    if (data?.role === "orthodontics") setView("orthodontics");
+  };
+
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
-      if (session) loadData();
+      if (session) { loadRole(session); loadData(); }
       else setLoading(false);
     });
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_e, session) => {
       setSession(session);
-      if (session) loadData();
+      if (session) { loadRole(session); loadData(); }
     });
     return () => subscription.unsubscribe();
   }, []);
@@ -5685,6 +5737,7 @@ export default function App() {
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
+    setRole("admin");
     setPatients([]); setAppointments([]); setTreatments([]); setBudgets([]); setAestheticCases([]); setOrthodonticsCases([]); setImplantologyCases([]); setEndodonticsCases([]);
   };
 
@@ -5787,18 +5840,22 @@ export default function App() {
     XLSX.writeFile(wb, `Clinica_Olimpia_${fecha}.xlsx`);
   };
 
-  const navItems = [
-    { id: "dashboard",      label: "Inicio",           icon: "⊞" },
-    { id: "agenda",         label: "Agenda",            icon: "📅" },
-    { id: "patients",       label: "Pacientes",         icon: "👥" },
-    { id: "treatments",     label: "Historial Clínico", icon: "🦷" },
-    { id: "budgets",        label: "Presupuestos",      icon: "📋" },
-    { id: "aesthetic",      label: "Estética Dental",   icon: "✨" },
-    { id: "endodontics",    label: "Endodoncia",        icon: "🦷" },
-    { id: "orthodontics",   label: "Ortodoncia",        icon: "🔧" },
-    { id: "implantology",   label: "Implantología",     icon: "⚙️" },
-    { id: "performance",    label: "Rendimiento",       icon: "📊" },
-  ];
+  const isOrtho = role === "orthodontics";
+
+  const navItems = isOrtho
+    ? [{ id: "orthodontics", label: "Ortodoncia", icon: "🔧" }]
+    : [
+        { id: "dashboard",      label: "Inicio",           icon: "⊞" },
+        { id: "agenda",         label: "Agenda",            icon: "📅" },
+        { id: "patients",       label: "Pacientes",         icon: "👥" },
+        { id: "treatments",     label: "Historial Clínico", icon: "🦷" },
+        { id: "budgets",        label: "Presupuestos",      icon: "📋" },
+        { id: "aesthetic",      label: "Estética Dental",   icon: "✨" },
+        { id: "endodontics",    label: "Endodoncia",        icon: "🦷" },
+        { id: "orthodontics",   label: "Ortodoncia",        icon: "🔧" },
+        { id: "implantology",   label: "Implantología",     icon: "⚙️" },
+        { id: "performance",    label: "Rendimiento",       icon: "📊" },
+      ];
 
   if (loading) return (
     <div style={{ minHeight: "100vh", background: COLORS.bg, display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: 16 }}>
@@ -5846,25 +5903,25 @@ export default function App() {
 
         {/* Footer sidebar */}
         <div style={{ padding: "16px 12px", borderTop: "1px solid #2a4f8844", display: "flex", flexDirection: "column", gap: 8 }}>
-          <button onClick={gcalConnected ? null : connectGCal}
+          {!isOrtho && <button onClick={gcalConnected ? null : connectGCal}
             style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 14px", borderRadius: 10, border: "none", background: gcalConnected ? "#16423044" : "transparent", color: gcalConnected ? "#34d399" : COLORS.sidebarText, cursor: gcalConnected ? "default" : "pointer", fontSize: 12, textAlign: "left", width: "100%" }}
             onMouseEnter={e => { if (!gcalConnected) e.currentTarget.style.background = "#2a4f9644"; }}
             onMouseLeave={e => { if (!gcalConnected) e.currentTarget.style.background = "transparent"; }}>
             <span>{gcalConnected ? "✅" : "📆"}</span>
             {gcalConnected ? "Google Cal conectado" : gcalSyncing ? "Sincronizando…" : "Conectar Google Cal"}
-          </button>
-          <button onClick={exportarExcel}
+          </button>}
+          {!isOrtho && <button onClick={exportarExcel}
             style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 14px", borderRadius: 10, border: "none", background: "transparent", color: COLORS.sidebarText, cursor: "pointer", fontSize: 12, textAlign: "left", width: "100%" }}
             onMouseEnter={e => e.currentTarget.style.background = "#2a4f9644"}
             onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
             <span>📥</span> Exportar Excel
-          </button>
-          <button onClick={copyLink}
+          </button>}
+          {!isOrtho && <button onClick={copyLink}
             style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 14px", borderRadius: 10, border: "none", background: "transparent", color: copied ? "#34d399" : COLORS.sidebarText, cursor: "pointer", fontSize: 12, textAlign: "left", width: "100%" }}
             onMouseEnter={e => e.currentTarget.style.background = "#2a4f9644"}
             onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
             <span>{copied ? "✓" : "🔗"}</span> {copied ? "¡Copiado!" : "Compartir registro"}
-          </button>
+          </button>}
           <button onClick={handleLogout}
             style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 14px", borderRadius: 10, border: "none", background: "transparent", color: "#fca5a5", cursor: "pointer", fontSize: 12, textAlign: "left", width: "100%" }}
             onMouseEnter={e => e.currentTarget.style.background = "#7f1d1d44"}
@@ -5890,27 +5947,32 @@ export default function App() {
             <div style={{ fontSize: 12, color: COLORS.textMuted, background: COLORS.bg, padding: "6px 14px", borderRadius: 20, border: `1px solid ${COLORS.border}` }}>
               {new Date().toLocaleDateString("es-CL", { weekday: "long", day: "numeric", month: "long" })}
             </div>
-            <button onClick={exportarExcel} style={{ display: "flex", alignItems: "center", gap: 6, background: "#f0fdf4", color: COLORS.success, border: `1.5px solid #86efac`, borderRadius: 8, cursor: "pointer", fontSize: 12, padding: "6px 14px", fontWeight: 700 }}>
+            {!isOrtho && <button onClick={exportarExcel} style={{ display: "flex", alignItems: "center", gap: 6, background: "#f0fdf4", color: COLORS.success, border: `1.5px solid #86efac`, borderRadius: 8, cursor: "pointer", fontSize: 12, padding: "6px 14px", fontWeight: 700 }}>
               📥 Exportar Excel
-            </button>
-            <button onClick={copyLink} style={{ display: "flex", alignItems: "center", gap: 6, background: copied ? "#f0fdf4" : "#eff6ff", color: copied ? COLORS.success : COLORS.accent, border: `1.5px solid ${copied ? "#86efac" : "#93c5fd"}`, borderRadius: 8, cursor: "pointer", fontSize: 12, padding: "6px 14px", fontWeight: 700 }}>
+            </button>}
+            {!isOrtho && <button onClick={copyLink} style={{ display: "flex", alignItems: "center", gap: 6, background: copied ? "#f0fdf4" : "#eff6ff", color: copied ? COLORS.success : COLORS.accent, border: `1.5px solid ${copied ? "#86efac" : "#93c5fd"}`, borderRadius: 8, cursor: "pointer", fontSize: 12, padding: "6px 14px", fontWeight: 700 }}>
               {copied ? "✓ Copiado" : "🔗 Registro paciente"}
-            </button>
+            </button>}
           </div>
         </header>
 
         {/* Vistas */}
         <div style={{ padding: "28px 28px", flex: 1, maxWidth: 900, width: "100%" }}>
-          {view === "dashboard"   && <DashboardView appointments={appointments} treatments={treatments} patients={patients} orthodonticsCases={orthodonticsCases} implantologyCases={implantologyCases} endodonticsCases={endodonticsCases} setView={setView} setAgendaConfig={setAgendaConfig} />}
-          {view === "agenda"      && <AgendaView key={agendaConfig.date + agendaConfig.filter} appointments={appointments} patients={patients} setAppointments={setAppointments} setView={setView} setSelectedPatient={setSelectedPatient} initialDate={agendaConfig.date} initialFilter={agendaConfig.filter} syncGCal={syncGCal} gcalConnected={gcalConnected} connectGCal={connectGCal} />}
-          {view === "patients"    && <PatientsView patients={patients} setPatients={setPatients} appointments={appointments} treatments={treatments} setTreatments={setTreatments} selectedPatient={selectedPatient} setSelectedPatient={setSelectedPatient} />}
-          {view === "treatments"  && <TreatmentsView treatments={treatments} setTreatments={setTreatments} patients={patients} />}
-          {view === "budgets"     && <BudgetView budgets={budgets} setBudgets={setBudgets} patients={patients} treatments={treatments} setTreatments={setTreatments} />}
-          {view === "aesthetic"    && <AestheticView aestheticCases={aestheticCases} setAestheticCases={setAestheticCases} patients={patients} />}
-          {view === "endodontics"  && <EndodonciaView cases={endodonticsCases} setCases={setEndodonticsCases} patients={patients} />}
-          {view === "orthodontics" && <OrtodonciaView cases={orthodonticsCases} setCases={setOrthodonticsCases} patients={patients} />}
-          {view === "implantology" && <ImplantologiaView cases={implantologyCases} setCases={setImplantologyCases} patients={patients} />}
-          {view === "performance"  && <PerformanceView appointments={appointments} treatments={treatments} patients={patients} orthodonticsCases={orthodonticsCases} implantologyCases={implantologyCases} endodonticsCases={endodonticsCases} />}
+          {isOrtho
+            ? <OrtodonciaView cases={orthodonticsCases} setCases={setOrthodonticsCases} patients={patients} setPatients={setPatients} />
+            : <>
+                {view === "dashboard"   && <DashboardView appointments={appointments} treatments={treatments} patients={patients} orthodonticsCases={orthodonticsCases} implantologyCases={implantologyCases} endodonticsCases={endodonticsCases} setView={setView} setAgendaConfig={setAgendaConfig} />}
+                {view === "agenda"      && <AgendaView key={agendaConfig.date + agendaConfig.filter} appointments={appointments} patients={patients} setAppointments={setAppointments} setView={setView} setSelectedPatient={setSelectedPatient} initialDate={agendaConfig.date} initialFilter={agendaConfig.filter} syncGCal={syncGCal} gcalConnected={gcalConnected} connectGCal={connectGCal} />}
+                {view === "patients"    && <PatientsView patients={patients} setPatients={setPatients} appointments={appointments} treatments={treatments} setTreatments={setTreatments} selectedPatient={selectedPatient} setSelectedPatient={setSelectedPatient} />}
+                {view === "treatments"  && <TreatmentsView treatments={treatments} setTreatments={setTreatments} patients={patients} />}
+                {view === "budgets"     && <BudgetView budgets={budgets} setBudgets={setBudgets} patients={patients} treatments={treatments} setTreatments={setTreatments} />}
+                {view === "aesthetic"    && <AestheticView aestheticCases={aestheticCases} setAestheticCases={setAestheticCases} patients={patients} />}
+                {view === "endodontics"  && <EndodonciaView cases={endodonticsCases} setCases={setEndodonticsCases} patients={patients} />}
+                {view === "orthodontics" && <OrtodonciaView cases={orthodonticsCases} setCases={setOrthodonticsCases} patients={patients} setPatients={setPatients} />}
+                {view === "implantology" && <ImplantologiaView cases={implantologyCases} setCases={setImplantologyCases} patients={patients} />}
+                {view === "performance"  && <PerformanceView appointments={appointments} treatments={treatments} patients={patients} orthodonticsCases={orthodonticsCases} implantologyCases={implantologyCases} endodonticsCases={endodonticsCases} />}
+              </>
+          }
         </div>
       </main>
 

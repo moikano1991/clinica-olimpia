@@ -11,10 +11,16 @@ const CALENDAR_ID   = Deno.env.get("GOOGLE_CALENDAR_ID") ?? "primary";
 const SITE_URL      = Deno.env.get("SITE_URL") ?? "https://clinicaolimpia.cl/";
 const REDIRECT_URI  = `${Deno.env.get("SUPABASE_URL")}/functions/v1/google-calendar`;
 
-const cors = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-};
+const ALLOWED_ORIGINS = ["https://clinicaolimpia.cl", "https://moikano1991.github.io"];
+
+function corsHeaders(req: Request) {
+  const origin = req.headers.get("origin") ?? "";
+  return {
+    "Access-Control-Allow-Origin": ALLOWED_ORIGINS.includes(origin) ? origin : ALLOWED_ORIGINS[0],
+    "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+    "Vary": "Origin",
+  };
+}
 
 // ── Obtener access token (auto-refresh) ──────────────────────────────
 async function getAccessToken(): Promise<string | null> {
@@ -85,6 +91,7 @@ function buildEvent(appt: Record<string, unknown>) {
 
 // ── Handler principal ────────────────────────────────────────────────
 Deno.serve(async (req) => {
+  const cors = corsHeaders(req);
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
 
   const url = new URL(req.url);
