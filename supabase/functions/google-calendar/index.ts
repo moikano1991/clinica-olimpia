@@ -8,7 +8,7 @@ const supabase = createClient(
 const CLIENT_ID     = Deno.env.get("GOOGLE_CLIENT_ID") ?? "";
 const CLIENT_SECRET = Deno.env.get("GOOGLE_CLIENT_SECRET") ?? "";
 const CALENDAR_ID   = Deno.env.get("GOOGLE_CALENDAR_ID") ?? "primary";
-const SITE_URL      = Deno.env.get("SITE_URL") ?? "https://moikano1991.github.io/clinica-olimpia/";
+const SITE_URL      = Deno.env.get("SITE_URL") ?? "https://clinicaolimpia.cl/";
 const REDIRECT_URI  = `${Deno.env.get("SUPABASE_URL")}/functions/v1/google-calendar`;
 
 const cors = {

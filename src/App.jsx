@@ -24,7 +24,7 @@ const COLORS = {
   textDim: "#94a3b8",
 };
 
-const SITE_URL = "https://moikano1991.github.io/clinica-olimpia/";
+const SITE_URL = "https://clinicaolimpia.cl/";
 
 const toAppt = (r) => ({ ...r, patientId: r.patient_id });
 const toTreat = (r) => ({ ...r, patientId: r.patient_id });
