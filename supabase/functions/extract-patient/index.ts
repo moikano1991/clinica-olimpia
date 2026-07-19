@@ -2,12 +2,19 @@ import Anthropic from "https://esm.sh/@anthropic-ai/sdk";
 
 const anthropic = new Anthropic({ apiKey: Deno.env.get("ANTHROPIC_KEY") ?? "" });
 
-const cors = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-};
+const ALLOWED_ORIGINS = ["https://clinicaolimpia.cl", "https://moikano1991.github.io"];
+
+function corsHeaders(req: Request) {
+  const origin = req.headers.get("origin") ?? "";
+  return {
+    "Access-Control-Allow-Origin": ALLOWED_ORIGINS.includes(origin) ? origin : ALLOWED_ORIGINS[0],
+    "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+    "Vary": "Origin",
+  };
+}
 
 Deno.serve(async (req) => {
+  const cors = corsHeaders(req);
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
 
   try {
