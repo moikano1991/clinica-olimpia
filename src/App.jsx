@@ -818,7 +818,7 @@ function PatientsView({ patients, setPatients, appointments, treatments, setTrea
       const t = treatments.find(x => x.id === al.treatment_id);
       if (!t) continue; // el tratamiento fue eliminado
       const newPaid = Math.max(0, t.paid - al.amount);
-      const status = newPaid >= t.cost ? "completado" : newPaid > 0 ? "pendiente pago" : "completado";
+      const status = newPaid >= t.cost ? "completado" : "pendiente pago";
       const { error: updError } = await supabase.from("treatments").update({ paid: newPaid, status }).eq("id", t.id);
       if (updError) alert("El abono se eliminó pero no se pudo actualizar el tratamiento \"" + t.procedure + "\": " + updError.message);
       else setTreatments(prev => prev.map(x => x.id === t.id ? { ...x, paid: newPaid, status } : x));
