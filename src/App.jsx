@@ -4,6 +4,7 @@ import * as XLSX from "xlsx";
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
 import QRCode from "qrcode";
+import { FIRMA_TIMBRE, FIRMA_TIMBRE_RATIO } from "./firmaTimbre";
 
 const COLORS = {
   bg: "#f0f4f8",
@@ -4987,35 +4988,20 @@ Clínica Olimpia · Arturo Prat 350, Of. 506 · Temuco`;
     doc.setDrawColor(200, 210, 220);
     doc.setLineWidth(0.3);
 
-    // Timbre (cuadro punteado)
-    doc.setLineDashPattern([1.5, 1.5], 0);
-    doc.rect(20, boxY, 42, 40);
-    doc.setLineDashPattern([], 0);
-    doc.setFontSize(9);
-    doc.setTextColor(148, 163, 184);
-    doc.text("TIMBRE", 41, boxY + 22, { align: "center" });
-
     // QR de verificación
-    if (qrDataUrl) doc.addImage(qrDataUrl, "PNG", 78, boxY, 32, 32);
+    if (qrDataUrl) doc.addImage(qrDataUrl, "PNG", 30, boxY, 32, 32);
     doc.setFontSize(7);
     doc.setFont("helvetica", "normal");
     doc.setTextColor(100, 116, 139);
-    doc.text("Escanee para verificar", 94, boxY + 36, { align: "center" });
+    doc.text("Escanee para verificar", 46, boxY + 36, { align: "center" });
     doc.setFont("helvetica", "bold");
     doc.setFontSize(8);
     doc.setTextColor(30, 41, 59);
-    doc.text(code, 94, boxY + 41, { align: "center" });
+    doc.text(code, 46, boxY + 41, { align: "center" });
 
-    // Firma (línea sólida)
-    doc.setDrawColor(100, 116, 139);
-    doc.line(133, boxY + 30, 190, boxY + 30);
-    doc.setTextColor(30, 41, 59);
-    doc.setFontSize(9);
-    doc.setFont("helvetica", "bold");
-    doc.text("Dra. María Florencia Muñoz", 161, boxY + 36, { align: "center" });
-    doc.setFont("helvetica", "normal");
-    doc.setTextColor(100, 116, 139);
-    doc.text("Firma profesional", 161, boxY + 41, { align: "center" });
+    // Firma y timbre de la Dra.
+    const sigW = 70, sigH = sigW / FIRMA_TIMBRE_RATIO;
+    doc.addImage(FIRMA_TIMBRE, "PNG", 160 - sigW / 2, boxY - 2, sigW, sigH);
 
     // Footer
     doc.setFillColor(240, 244, 248);
@@ -5645,7 +5631,7 @@ Clínica Olimpia · Arturo Prat 350, Of. 506 · Temuco`;
               </div>
 
               <div style={{ background: COLORS.bg, border: `1px dashed ${COLORS.border}`, borderRadius: 8, padding: "8px 12px", marginTop: 14, fontSize: 11, color: COLORS.textDim }}>
-                El PDF incluye una zona reservada para <strong>timbre</strong> y <strong>firma del profesional</strong>.
+                El PDF incluye la <strong>firma y timbre</strong> de la Dra. y un QR de verificación.
               </div>
 
               <div style={{ display: "flex", gap: 10, marginTop: 20 }}>
@@ -5741,27 +5727,10 @@ function AttendanceCertView({ patients }) {
     paragraph(`perteneciente a ${form.organization.trim()}, asistió a ${reason} en Clínica Olimpia, ubicada en Arturo Prat 350, Of. 506, Temuco, el día ${longDate(form.date)}${timePart}.`);
     paragraph(`Se extiende el presente certificado a solicitud del interesado(a), para ser presentado en ${form.organization.trim()}.`);
 
-    // Firma
-    const boxY = 200;
-    doc.setDrawColor(200, 210, 220);
-    doc.setLineWidth(0.3);
-    doc.setLineDashPattern([1.5, 1.5], 0);
-    doc.rect(25, boxY, 42, 40);
-    doc.setLineDashPattern([], 0);
-    doc.setFontSize(9);
-    doc.setTextColor(148, 163, 184);
-    doc.text("TIMBRE", 46, boxY + 22, { align: "center" });
-
-    doc.setDrawColor(100, 116, 139);
-    doc.line(120, boxY + 30, 185, boxY + 30);
-    doc.setTextColor(30, 41, 59);
-    doc.setFontSize(10);
-    doc.setFont("helvetica", "bold");
-    doc.text("Dra. María Florencia Muñoz", 152.5, boxY + 36, { align: "center" });
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(9);
-    doc.setTextColor(100, 116, 139);
-    doc.text("Cirujano Dentista", 152.5, boxY + 41, { align: "center" });
+    // Firma y timbre de la Dra.
+    const boxY = 190;
+    const sigW = 80, sigH = sigW / FIRMA_TIMBRE_RATIO;
+    doc.addImage(FIRMA_TIMBRE, "PNG", 105 - sigW / 2, boxY, sigW, sigH);
 
     // Footer
     doc.setFillColor(240, 244, 248);
