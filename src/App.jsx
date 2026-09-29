@@ -5664,6 +5664,181 @@ Clínica Olimpia · Arturo Prat 350, Of. 506 · Temuco`;
   );
 }
 
+// ── Módulo Certificados de atención dental ─────────────────────────
+function AttendanceCertView({ patients }) {
+  const defaultForm = { name: "", rut: "", organization: "", date: today(), timeFrom: "", timeTo: "", reason: "atención dental" };
+  const [form, setForm] = useState(defaultForm);
+  const [sugg, setSugg] = useState([]);
+
+  const inputStyle = { width: "100%", padding: "9px 12px", border: `1px solid ${COLORS.border}`, borderRadius: 8, fontSize: 14, color: COLORS.text, background: COLORS.bg, boxSizing: "border-box" };
+  const labelStyle = { color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 };
+
+  const handleName = (val) => {
+    setForm(f => ({ ...f, name: val }));
+    const q = val.trim().toLowerCase();
+    if (!q) { setSugg([]); return; }
+    setSugg(patients.filter(p => p.name?.toLowerCase().includes(q)).slice(0, 6));
+  };
+
+  const longDate = (d) => new Date(d + "T00:00:00").toLocaleDateString("es-CL", { day: "numeric", month: "long", year: "numeric" });
+  const canGenerate = form.name.trim() && form.organization.trim() && form.date;
+
+  const generatePDF = () => {
+    if (!canGenerate) return;
+    const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+
+    // Header
+    doc.setFillColor(30, 58, 110);
+    doc.rect(0, 0, 210, 34, "F");
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(20);
+    doc.setFont("helvetica", "bold");
+    doc.text("Clínica Olimpia", 14, 15);
+    doc.setFontSize(9);
+    doc.setFont("helvetica", "normal");
+    doc.text("Arturo Prat 350, Of. 506 · Temuco, La Araucanía", 14, 22);
+    doc.text("Dra. María Florencia Muñoz · Cirujano Dentista", 14, 28);
+
+    // Título
+    doc.setTextColor(30, 58, 110);
+    doc.setFontSize(17);
+    doc.setFont("helvetica", "bold");
+    doc.text("CERTIFICADO DE ATENCIÓN DENTAL", 105, 48, { align: "center" });
+    doc.setDrawColor(37, 99, 235);
+    doc.setLineWidth(0.6);
+    doc.line(45, 52, 165, 52);
+
+    doc.setFontSize(9);
+    doc.setFont("helvetica", "normal");
+    doc.setTextColor(100, 116, 139);
+    doc.text(`Temuco, ${longDate(form.date)}`, 196, 62, { align: "right" });
+
+    // Cuerpo
+    doc.setFontSize(12);
+    doc.setTextColor(30, 41, 59);
+    let y = 80;
+    const paragraph = (text) => {
+      const lines = doc.splitTextToSize(text, 170);
+      doc.text(lines, 20, y, { lineHeightFactor: 1.6 });
+      y += lines.length * 8 + 6;
+    };
+
+    const rutPart = form.rut.trim() ? `, RUT ${form.rut.trim()}` : "";
+    const timePart = form.timeFrom && form.timeTo
+      ? `, entre las ${form.timeFrom} y las ${form.timeTo} hrs`
+      : form.timeFrom ? `, a partir de las ${form.timeFrom} hrs` : "";
+    const reason = form.reason.trim() || "atención dental";
+
+    paragraph("La Dra. María Florencia Muñoz, Cirujano Dentista, certifica que:");
+
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(14);
+    doc.text(`${form.name.trim().toUpperCase()}${rutPart}`, 105, y, { align: "center", maxWidth: 170 });
+    y += 12;
+
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(12);
+    paragraph(`perteneciente a ${form.organization.trim()}, asistió a ${reason} en Clínica Olimpia, ubicada en Arturo Prat 350, Of. 506, Temuco, el día ${longDate(form.date)}${timePart}.`);
+    paragraph(`Se extiende el presente certificado a solicitud del interesado(a), para ser presentado en ${form.organization.trim()}.`);
+
+    // Firma
+    const boxY = 200;
+    doc.setDrawColor(200, 210, 220);
+    doc.setLineWidth(0.3);
+    doc.setLineDashPattern([1.5, 1.5], 0);
+    doc.rect(25, boxY, 42, 40);
+    doc.setLineDashPattern([], 0);
+    doc.setFontSize(9);
+    doc.setTextColor(148, 163, 184);
+    doc.text("TIMBRE", 46, boxY + 22, { align: "center" });
+
+    doc.setDrawColor(100, 116, 139);
+    doc.line(120, boxY + 30, 185, boxY + 30);
+    doc.setTextColor(30, 41, 59);
+    doc.setFontSize(10);
+    doc.setFont("helvetica", "bold");
+    doc.text("Dra. María Florencia Muñoz", 152.5, boxY + 36, { align: "center" });
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(9);
+    doc.setTextColor(100, 116, 139);
+    doc.text("Cirujano Dentista", 152.5, boxY + 41, { align: "center" });
+
+    // Footer
+    doc.setFillColor(240, 244, 248);
+    doc.rect(0, 282, 210, 15, "F");
+    doc.setFontSize(8);
+    doc.setFont("helvetica", "italic");
+    doc.setTextColor(148, 163, 184);
+    doc.text("Clínica Estética y Dental Olimpia · Arturo Prat 350, Of. 506, Temuco", 105, 291, { align: "center" });
+
+    doc.save(`Certificado_Atencion_${form.name.trim().replace(/\s+/g, "_")}_${form.date}.pdf`);
+  };
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 16, maxWidth: 560 }}>
+      <div>
+        <h2 style={{ margin: 0, color: COLORS.text, fontSize: 20 }}>📄 Certificados de atención dental</h2>
+        <p style={{ margin: "4px 0 0", color: COLORS.textMuted, fontSize: 13 }}>Genera un certificado en PDF para presentar en la empresa o colegio.</p>
+      </div>
+
+      <div style={{ background: COLORS.card, border: `1px solid ${COLORS.border}`, borderRadius: 14, padding: 20, display: "flex", flexDirection: "column", gap: 14 }}>
+        <div style={{ position: "relative" }}>
+          <label style={labelStyle}>Nombre del trabajador / alumno *</label>
+          <input value={form.name} onChange={e => handleName(e.target.value)} placeholder="Escribe un nombre o busca un paciente..." style={inputStyle} />
+          {sugg.length > 0 && (
+            <div style={{ position: "absolute", top: "100%", left: 0, right: 0, background: COLORS.card, border: `1px solid ${COLORS.border}`, borderRadius: 10, zIndex: 300, boxShadow: "0 8px 24px rgba(0,0,0,0.12)", marginTop: 4 }}>
+              {sugg.map(p => (
+                <div key={p.id} onClick={() => { setForm(f => ({ ...f, name: p.name, rut: p.rut || f.rut })); setSugg([]); }}
+                  style={{ padding: "10px 14px", cursor: "pointer", display: "flex", justifyContent: "space-between", borderBottom: `1px solid ${COLORS.border}` }}
+                  onMouseEnter={e => e.currentTarget.style.background = COLORS.bg}
+                  onMouseLeave={e => e.currentTarget.style.background = ""}>
+                  <span style={{ fontWeight: 600 }}>{p.name}</span>
+                  {p.rut && <span style={{ color: COLORS.textMuted, fontSize: 12 }}>{p.rut}</span>}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div>
+          <label style={labelStyle}>RUT (opcional)</label>
+          <input value={form.rut} onChange={e => setForm(f => ({ ...f, rut: e.target.value }))} placeholder="12.345.678-9" style={inputStyle} />
+        </div>
+
+        <div>
+          <label style={labelStyle}>Nombre de la empresa o colegio *</label>
+          <input value={form.organization} onChange={e => setForm(f => ({ ...f, organization: e.target.value }))} placeholder="Ej: Colegio Centenario / Empresa XYZ" style={inputStyle} />
+        </div>
+
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 12 }}>
+          <div>
+            <label style={labelStyle}>Fecha de atención *</label>
+            <input type="date" value={form.date} onChange={e => setForm(f => ({ ...f, date: e.target.value }))} style={inputStyle} />
+          </div>
+          <div>
+            <label style={labelStyle}>Hora desde (opcional)</label>
+            <input type="time" value={form.timeFrom} onChange={e => setForm(f => ({ ...f, timeFrom: e.target.value }))} style={inputStyle} />
+          </div>
+          <div>
+            <label style={labelStyle}>Hora hasta (opcional)</label>
+            <input type="time" value={form.timeTo} onChange={e => setForm(f => ({ ...f, timeTo: e.target.value }))} style={inputStyle} />
+          </div>
+        </div>
+
+        <div>
+          <label style={labelStyle}>Motivo</label>
+          <input value={form.reason} onChange={e => setForm(f => ({ ...f, reason: e.target.value }))} placeholder="atención dental" style={inputStyle} />
+        </div>
+
+        <button onClick={generatePDF} disabled={!canGenerate}
+          style={{ background: canGenerate ? "#7c3aed" : COLORS.textDim, color: "#fff", border: "none", borderRadius: 10, padding: "12px", fontWeight: 700, cursor: canGenerate ? "pointer" : "not-allowed", fontSize: 15 }}>
+          📄 Generar certificado PDF
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   // Mostrar formulario público si la URL tiene #registro
   if (window.location.hash === "#registro") return <RegistroView />;
@@ -5854,6 +6029,7 @@ export default function App() {
         { id: "patients",       label: "Pacientes",         icon: "👥" },
         { id: "treatments",     label: "Historial Clínico", icon: "🦷" },
         { id: "budgets",        label: "Presupuestos",      icon: "📋" },
+        { id: "certificates",   label: "Certificados",      icon: "📄" },
         { id: "aesthetic",      label: "Estética Dental",   icon: "✨" },
         { id: "endodontics",    label: "Endodoncia",        icon: "🦷" },
         { id: "orthodontics",   label: "Ortodoncia",        icon: "🔧" },
@@ -5970,6 +6146,7 @@ export default function App() {
                 {view === "patients"    && <PatientsView patients={patients} setPatients={setPatients} appointments={appointments} treatments={treatments} setTreatments={setTreatments} selectedPatient={selectedPatient} setSelectedPatient={setSelectedPatient} />}
                 {view === "treatments"  && <TreatmentsView treatments={treatments} setTreatments={setTreatments} patients={patients} />}
                 {view === "budgets"     && <BudgetView budgets={budgets} setBudgets={setBudgets} patients={patients} treatments={treatments} setTreatments={setTreatments} />}
+                {view === "certificates" && <AttendanceCertView patients={patients} />}
                 {view === "aesthetic"    && <AestheticView aestheticCases={aestheticCases} setAestheticCases={setAestheticCases} patients={patients} />}
                 {view === "endodontics"  && <EndodonciaView cases={endodonticsCases} setCases={setEndodonticsCases} patients={patients} />}
                 {view === "orthodontics" && <OrtodonciaView cases={orthodonticsCases} setCases={setOrthodonticsCases} patients={patients} setPatients={setPatients} />}
