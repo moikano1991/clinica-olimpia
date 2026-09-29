@@ -5000,7 +5000,7 @@ Clínica Olimpia · Arturo Prat 350, Of. 506 · Temuco`;
     doc.text(code, 46, boxY + 41, { align: "center" });
 
     // Firma y timbre de la Dra.
-    const sigW = 70, sigH = sigW / FIRMA_TIMBRE_RATIO;
+    const sigW = 46, sigH = sigW / FIRMA_TIMBRE_RATIO;
     doc.addImage(FIRMA_TIMBRE, "PNG", 160 - sigW / 2, boxY - 2, sigW, sigH);
 
     // Footer
@@ -5729,7 +5729,7 @@ function AttendanceCertView({ patients }) {
 
     // Firma y timbre de la Dra.
     const boxY = 190;
-    const sigW = 80, sigH = sigW / FIRMA_TIMBRE_RATIO;
+    const sigW = 50, sigH = sigW / FIRMA_TIMBRE_RATIO;
     doc.addImage(FIRMA_TIMBRE, "PNG", 105 - sigW / 2, boxY, sigW, sigH);
 
     // Footer
