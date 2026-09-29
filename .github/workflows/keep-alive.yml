@@ -1,0 +1,28 @@
+name: Keep Supabase Alive
+
+# Los proyectos Free de Supabase se pausan tras 7 días sin actividad.
+# Este workflow hace una consulta liviana cada 3 días para que nunca llegue a pausarse.
+
+on:
+  schedule:
+    - cron: "0 12 */3 * *"
+  workflow_dispatch: {}
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Supabase REST API
+        env:
+          SUPABASE_ANON_KEY: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZpcXhxbXVjenNtdHNmd2dnZ3ZqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg3ODcxNDYsImV4cCI6MjA5NDM2MzE0Nn0.TF8lCdD5MysSbi_pCTe6ICoBx_qpHIe2kAejDTzi9Gg
+        run: |
+          STATUS=$(curl -s -o /tmp/resp.json -w "%{http_code}" \
+            "https://fiqxqmuczsmtsfwgggvj.supabase.co/rest/v1/patients?select=id&limit=1" \
+            -H "apikey: $SUPABASE_ANON_KEY" \
+            -H "Authorization: Bearer $SUPABASE_ANON_KEY")
+          echo "HTTP status: $STATUS"
+          cat /tmp/resp.json
+          if [ "$STATUS" -ge 400 ]; then
+            echo "::error::Supabase respondió con error $STATUS"
+            exit 1
+          fi
