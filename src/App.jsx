@@ -616,6 +616,17 @@ function PatientsView({ patients, setPatients, appointments, treatments, setTrea
 
   useEffect(() => { if (selectedPatient) setDetail(selectedPatient); }, [selectedPatient]);
 
+  // Abonos directos a la deuda general
+  const ABONO_METHODS = { efectivo: "Efectivo", tarjeta: "Tarjeta", transferencia: "Transferencia" };
+  const [patientPayments, setPatientPayments] = useState([]);
+  const [showAbono, setShowAbono] = useState(false);
+  const [abonoForm, setAbonoForm] = useState({ amount: "", method: "efectivo", date: today() });
+  useEffect(() => {
+    if (!detail) { setPatientPayments([]); return; }
+    supabase.from("patient_payments").select("*").eq("patient_id", detail).order("date", { ascending: false })
+      .then(({ data }) => setPatientPayments(data || []));
+  }, [detail]);
+
   const normalizeRut = (r) => (r || "").replace(/[.\-]/g, "").toLowerCase();
   const getPatientDebt = (patientId) =>
     treatments
@@ -761,6 +772,43 @@ function PatientsView({ patients, setPatients, appointments, treatments, setTrea
     }
   };
 
+  // Registra un abono y lo reparte entre los tratamientos con saldo, del más antiguo al más nuevo
+  const saveAbono = async (patient, debtTreats, totalDebt) => {
+    const amount = Number(abonoForm.amount);
+    if (!amount || amount <= 0) { alert("Ingresa un monto válido."); return; }
+    if (amount > totalDebt) { alert(`El abono no puede superar el saldo pendiente (${formatCLP(totalDebt)}).`); return; }
+    if (!abonoForm.date) { alert("Ingresa la fecha del abono."); return; }
+
+    let remaining = amount;
+    const allocations = [];
+    const updates = [];
+    const ordered = [...debtTreats].sort((a, b) => (a.date || "").localeCompare(b.date || "") || a.id - b.id);
+    for (const t of ordered) {
+      if (remaining <= 0) break;
+      const owed = t.cost - t.paid;
+      if (owed <= 0) continue;
+      const pay = Math.min(owed, remaining);
+      allocations.push({ treatment_id: t.id, amount: pay });
+      updates.push({ t, newPaid: t.paid + pay });
+      remaining -= pay;
+    }
+
+    const { data: payment, error } = await supabase.from("patient_payments").insert([{
+      patient_id: patient.id, amount, method: abonoForm.method, date: abonoForm.date, allocations,
+    }]).select().single();
+    if (error) { alert("Error guardando el abono: " + error.message); return; }
+
+    for (const { t, newPaid } of updates) {
+      const status = newPaid >= t.cost ? "completado" : "pendiente pago";
+      const { error: updError } = await supabase.from("treatments").update({ paid: newPaid, status }).eq("id", t.id);
+      if (updError) alert("El abono quedó registrado pero no se pudo actualizar el tratamiento \"" + t.procedure + "\": " + updError.message);
+      else setTreatments(prev => prev.map(x => x.id === t.id ? { ...x, paid: newPaid, status } : x));
+    }
+    setPatientPayments(prev => [payment, ...prev]);
+    setAbonoForm({ amount: "", method: "efectivo", date: today() });
+    setShowAbono(false);
+  };
+
   if (detail) {
     const p = patients.find(pt => pt.id === detail);
     if (!p) { setDetail(null); setSelectedPatient(null); return null; }
@@ -805,6 +853,12 @@ function PatientsView({ patients, setPatients, appointments, treatments, setTrea
               <div style={{ textAlign: "right" }}>
                 <div style={{ color: COLORS.textMuted, fontSize: 12 }}>Saldo pendiente</div>
                 <div style={{ color: totalDebt > 0 ? COLORS.danger : COLORS.success, fontWeight: 700, fontSize: 24 }}>{formatCLP(totalDebt)}</div>
+                {totalDebt > 0 && (
+                  <button onClick={() => { setAbonoForm({ amount: "", method: "efectivo", date: today() }); setShowAbono(true); }}
+                    style={{ marginTop: 6, background: COLORS.success + "15", color: COLORS.success, border: `1px solid ${COLORS.success}55`, borderRadius: 8, padding: "6px 14px", fontSize: 13, cursor: "pointer", fontWeight: 700 }}>
+                    💵 Abonar a la deuda
+                  </button>
+                )}
               </div>
               <button onClick={() => { setEditForm({ name: p.name, rut: p.rut || "", phone: p.phone || "", email: p.email || "", dob: p.dob || "", address: p.address || "", convenio: p.convenio || "", notes: p.notes || "" }); setShowEditForm(true); }}
                 style={{ background: COLORS.accent + "22", color: COLORS.accent, border: `1px solid ${COLORS.accent}44`, borderRadius: 8, padding: "6px 14px", fontSize: 13, cursor: "pointer", fontWeight: 600 }}>
@@ -864,6 +918,51 @@ function PatientsView({ patients, setPatients, appointments, treatments, setTrea
               <div style={{ display: "flex", gap: 10, marginTop: 20 }}>
                 <button onClick={() => updatePatient(p.id)} style={{ flex: 1, background: COLORS.accent, color: "#fff", border: "none", borderRadius: 8, padding: "10px", fontWeight: 700, cursor: "pointer" }}>Guardar cambios</button>
                 <button onClick={() => setShowEditForm(false)} style={{ flex: 1, background: COLORS.card, color: COLORS.textMuted, border: `1px solid ${COLORS.border}`, borderRadius: 8, padding: "10px", cursor: "pointer" }}>Cancelar</button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Modal abono a la deuda general */}
+        {showAbono && (
+          <div style={{ position: "fixed", inset: 0, background: "#00000088", zIndex: 200, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+            <div style={{ background: COLORS.surface, border: `1px solid ${COLORS.border}`, borderRadius: 16, padding: 28, width: "100%", maxWidth: 420 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                <h3 style={{ color: COLORS.text, margin: 0 }}>💵 Abonar a la deuda</h3>
+                <button onClick={() => setShowAbono(false)} style={{ background: "none", border: "none", color: COLORS.textMuted, cursor: "pointer", fontSize: 20 }}>×</button>
+              </div>
+              <div style={{ color: COLORS.textMuted, fontSize: 13, marginBottom: 16 }}>
+                {p.name} · Saldo pendiente: <strong style={{ color: COLORS.danger }}>{formatCLP(totalDebt)}</strong>
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+                <div>
+                  <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>Monto del abono ($) *</label>
+                  <input type="number" min="1" max={totalDebt} value={abonoForm.amount} onChange={e => setAbonoForm(f => ({ ...f, amount: e.target.value }))} placeholder="0" style={inputStyle} autoFocus />
+                </div>
+                <div>
+                  <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>Tipo de abono *</label>
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    {Object.entries(ABONO_METHODS).map(([value, label]) => (
+                      <button key={value} type="button" onClick={() => setAbonoForm(f => ({ ...f, method: value }))}
+                        style={{ flex: 1, minWidth: 90, padding: "9px 10px", borderRadius: 8, cursor: "pointer", fontSize: 13, fontWeight: 700,
+                          background: abonoForm.method === value ? COLORS.accent : COLORS.card,
+                          color: abonoForm.method === value ? "#fff" : COLORS.textMuted,
+                          border: `1px solid ${abonoForm.method === value ? COLORS.accent : COLORS.border}` }}>
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div>
+                  <label style={{ color: COLORS.textMuted, fontSize: 12, display: "block", marginBottom: 4 }}>Fecha del abono *</label>
+                  <input type="date" value={abonoForm.date} onChange={e => setAbonoForm(f => ({ ...f, date: e.target.value }))} style={inputStyle} />
+                </div>
+                <div style={{ color: COLORS.textDim, fontSize: 12 }}>El abono se descuenta de los tratamientos con saldo, del más antiguo al más reciente.</div>
+              </div>
+              <div style={{ display: "flex", gap: 10, marginTop: 20 }}>
+                <button onClick={() => saveAbono(p, pTreat.filter(t => (t.status === "completado" || t.status === "pendiente pago") && t.cost > t.paid), totalDebt)}
+                  style={{ flex: 2, background: COLORS.success, color: "#fff", border: "none", borderRadius: 8, padding: "10px", fontWeight: 700, cursor: "pointer" }}>Registrar abono</button>
+                <button onClick={() => setShowAbono(false)} style={{ flex: 1, background: COLORS.card, color: COLORS.textMuted, border: `1px solid ${COLORS.border}`, borderRadius: 8, padding: "10px", cursor: "pointer" }}>Cancelar</button>
               </div>
             </div>
           </div>
@@ -960,6 +1059,23 @@ function PatientsView({ patients, setPatients, appointments, treatments, setTrea
               </div>
               );
             })}
+          </div>
+        )}
+
+        {patientPayments.length > 0 && (
+          <div style={{ marginTop: 24 }}>
+            <h3 style={{ color: COLORS.text, marginBottom: 12 }}>Abonos realizados</h3>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {patientPayments.map(ap => (
+                <div key={ap.id} style={{ background: COLORS.card, border: `1px solid ${COLORS.border}`, borderRadius: 10, padding: "10px 16px", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+                  <div>
+                    <div style={{ color: COLORS.text, fontWeight: 600 }}>{formatDate(ap.date)}</div>
+                    <div style={{ color: COLORS.textMuted, fontSize: 12 }}>{ABONO_METHODS[ap.method] || ap.method}</div>
+                  </div>
+                  <div style={{ color: COLORS.success, fontWeight: 700 }}>{formatCLP(ap.amount)}</div>
+                </div>
+              ))}
+            </div>
           </div>
         )}
 
