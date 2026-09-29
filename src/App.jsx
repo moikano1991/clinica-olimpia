@@ -809,6 +809,23 @@ function PatientsView({ patients, setPatients, appointments, treatments, setTrea
     setShowAbono(false);
   };
 
+  // Reversa un abono: devuelve a cada tratamiento lo que se le había descontado y borra el registro
+  const reverseAbono = async (ap) => {
+    if (!window.confirm(`¿Reversar el abono de ${formatCLP(ap.amount)} del ${formatDate(ap.date)}? La deuda de los tratamientos afectados volverá a subir.`)) return;
+    const { error } = await supabase.from("patient_payments").delete().eq("id", ap.id);
+    if (error) { alert("Error reversando el abono: " + error.message); return; }
+    for (const al of (ap.allocations || [])) {
+      const t = treatments.find(x => x.id === al.treatment_id);
+      if (!t) continue; // el tratamiento fue eliminado
+      const newPaid = Math.max(0, t.paid - al.amount);
+      const status = newPaid >= t.cost ? "completado" : newPaid > 0 ? "pendiente pago" : "completado";
+      const { error: updError } = await supabase.from("treatments").update({ paid: newPaid, status }).eq("id", t.id);
+      if (updError) alert("El abono se eliminó pero no se pudo actualizar el tratamiento \"" + t.procedure + "\": " + updError.message);
+      else setTreatments(prev => prev.map(x => x.id === t.id ? { ...x, paid: newPaid, status } : x));
+    }
+    setPatientPayments(prev => prev.filter(x => x.id !== ap.id));
+  };
+
   if (detail) {
     const p = patients.find(pt => pt.id === detail);
     if (!p) { setDetail(null); setSelectedPatient(null); return null; }
@@ -1072,7 +1089,13 @@ function PatientsView({ patients, setPatients, appointments, treatments, setTrea
                     <div style={{ color: COLORS.text, fontWeight: 600 }}>{formatDate(ap.date)}</div>
                     <div style={{ color: COLORS.textMuted, fontSize: 12 }}>{ABONO_METHODS[ap.method] || ap.method}</div>
                   </div>
-                  <div style={{ color: COLORS.success, fontWeight: 700 }}>{formatCLP(ap.amount)}</div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    <div style={{ color: COLORS.success, fontWeight: 700 }}>{formatCLP(ap.amount)}</div>
+                    <button onClick={() => reverseAbono(ap)}
+                      style={{ background: COLORS.danger + "10", color: COLORS.danger, border: `1px solid ${COLORS.danger}33`, borderRadius: 6, padding: "4px 10px", fontSize: 11, cursor: "pointer", fontWeight: 700 }}>
+                      ↩ Reversar
+                    </button>
+                  </div>
                 </div>
               ))}
             </div>
