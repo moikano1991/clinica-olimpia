@@ -70,6 +70,14 @@ const treatmentCatalog = [
   "Obturación vidrio ionómero",
 ];
 
+// Estado de un tratamiento según lo pagado: saldado = completado; con deuda = pendiente de pago (salvo los planificados sin abono)
+const calcTreatStatus = (cost, paid, current) => {
+  if (cost > 0 && paid >= cost) return "completado";
+  if (paid > 0) return "pendiente pago";
+  if (cost > 0 && current !== "planificado") return "pendiente pago";
+  return current;
+};
+
 const formatCLP = (n) => "$ " + Math.round(n || 0).toLocaleString("es-CL");
 const formatDate = (d) => { if (!d) return ""; const [y, m, day] = d.split("-"); return `${day}/${m}/${y}`; };
 const today = () => new Date().toISOString().split("T")[0];
@@ -592,7 +600,7 @@ function PatientsView({ patients, setPatients, appointments, treatments, setTrea
     if (!editTreatDet) return;
     const costNum = Number(editTreatDet.cost) || 0;
     const paidNum = Number(editTreatDet.paid) || 0;
-    const autoStatus = paidNum >= costNum && costNum > 0 ? "completado" : paidNum > 0 ? "pendiente pago" : editTreatDet.status;
+    const autoStatus = calcTreatStatus(costNum, paidNum, editTreatDet.status);
     const autoDate = (!editTreatDet.date && (autoStatus === "completado" || autoStatus === "pendiente pago")) ? today() : editTreatDet.date;
     const { data, error } = await supabase.from("treatments").update({
       date: autoDate, procedure: editTreatDet.procedure, tooth: editTreatDet.tooth || "-",
@@ -758,7 +766,7 @@ function PatientsView({ patients, setPatients, appointments, treatments, setTrea
     if (!treatForm.procedure) return;
     const costNum = Number(treatForm.cost) || 0;
     const paidNum = Number(treatForm.paid) || 0;
-    const autoStatus = paidNum >= costNum && costNum > 0 ? "completado" : paidNum > 0 ? "pendiente pago" : treatForm.status;
+    const autoStatus = calcTreatStatus(costNum, paidNum, treatForm.status);
     const autoDate = (!treatForm.date && (autoStatus === "completado" || autoStatus === "pendiente pago")) ? today() : (treatForm.date || today());
     const { data, error } = await supabase.from("treatments").insert([{
       patient_id: patientId, date: autoDate, procedure: treatForm.procedure,
@@ -1505,7 +1513,7 @@ function TreatmentsView({ treatments, setTreatments, patients }) {
     if (!editTreat) return;
     const costNum = Number(editTreat.cost) || 0;
     const paidNum = Number(editTreat.paid) || 0;
-    const autoStatus = paidNum >= costNum && costNum > 0 ? "completado" : paidNum > 0 ? "pendiente pago" : editTreat.status;
+    const autoStatus = calcTreatStatus(costNum, paidNum, editTreat.status);
     const { data, error } = await supabase.from("treatments").update({
       date: editTreat.date, procedure: editTreat.procedure, tooth: editTreat.tooth || "-",
       cost: costNum, paid: paidNum, status: autoStatus, notes: editTreat.notes,
@@ -1532,7 +1540,7 @@ function TreatmentsView({ treatments, setTreatments, patients }) {
     if (!form.patientId || !form.procedure) return;
     const paidNum = Number(form.paid) || 0;
     const costNum = Number(form.cost) || 0;
-    const autoStatus = paidNum >= costNum && costNum > 0 ? "completado" : paidNum > 0 ? "pendiente pago" : form.status;
+    const autoStatus = calcTreatStatus(costNum, paidNum, form.status);
     const { data, error } = await supabase.from("treatments").insert([{
       patient_id: Number(form.patientId), date: form.date, procedure: form.procedure,
       tooth: form.tooth || "-", cost: costNum, paid: paidNum,
