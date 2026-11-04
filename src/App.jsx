@@ -61,6 +61,9 @@ const treatmentCatalog = [
   "Implante",
   "Ortodoncia consulta",
   "Reconstrucción de Resina",
+  "Resina oclusal",
+  "Resina flow",
+  "Incrustación",
   "Control",
   "Ajuste oclusal",
   "Retiro con contención",
@@ -4064,6 +4067,36 @@ const BUDGET_STATUS = {
   vencido:        { label: "Vencido",          color: "#d97706", bg: "#fffbeb" },
 };
 
+// Filas editables de los procedimientos de un presupuesto
+function BudgetItemRows({ items, onChange }) {
+  const cell = { width: "100%", padding: "5px 6px", border: `1px solid ${COLORS.border}`, borderRadius: 6, fontSize: 12, color: COLORS.text, background: COLORS.bg, boxSizing: "border-box" };
+  const cols = "1fr 56px 50px 84px 76px 28px";
+  const update = (idx, patch) => onChange(items.map((it, i) => i === idx ? { ...it, ...patch } : it));
+  const procedures = (proc) => treatmentCatalog.includes(proc) ? treatmentCatalog : [proc, ...treatmentCatalog];
+  return (
+    <>
+      <div style={{ display: "grid", gridTemplateColumns: cols, gap: 6, padding: "0 4px 6px", borderBottom: `1px solid ${COLORS.border}`, marginBottom: 6 }}>
+        {["Procedimiento", "Pieza", "Cant.", "Precio unit.", "Total", ""].map(h => (
+          <div key={h} style={{ fontSize: 10, color: COLORS.textMuted, fontWeight: 700 }}>{h}</div>
+        ))}
+      </div>
+      {items.map((it, idx) => (
+        <div key={it.id || idx} style={{ display: "grid", gridTemplateColumns: cols, gap: 6, padding: "4px", borderBottom: `1px solid ${COLORS.border}44`, alignItems: "center" }}>
+          <select value={it.procedure} onChange={e => update(idx, { procedure: e.target.value })} style={cell}>
+            {procedures(it.procedure).map(t => <option key={t} value={t}>{t}</option>)}
+          </select>
+          <input value={it.tooth === "-" ? "" : it.tooth} placeholder="—" onChange={e => update(idx, { tooth: e.target.value || "-" })} style={{ ...cell, textAlign: "center" }} />
+          <input type="number" min={1} value={it.quantity} onChange={e => update(idx, { quantity: Math.max(1, Number(e.target.value) || 1) })} style={{ ...cell, textAlign: "center" }} />
+          <input type="number" min={0} value={it.unitPrice} onChange={e => update(idx, { unitPrice: Math.max(0, Number(e.target.value) || 0) })} style={{ ...cell, textAlign: "right" }} />
+          <div style={{ fontSize: 12, color: COLORS.text, textAlign: "right", fontWeight: 600 }}>{formatCLP(it.quantity * it.unitPrice)}</div>
+          <button onClick={() => onChange(items.filter((_, i) => i !== idx))} title="Quitar"
+            style={{ background: COLORS.danger + "15", color: COLORS.danger, border: "none", borderRadius: 4, padding: "3px 7px", fontSize: 12, cursor: "pointer" }}>×</button>
+        </div>
+      ))}
+    </>
+  );
+}
+
 function BudgetStatusBadge({ status }) {
   const s = BUDGET_STATUS[status] || BUDGET_STATUS.borrador;
   return (
@@ -5359,21 +5392,7 @@ Clínica Olimpia · Arturo Prat 350, Of. 506 · Temuco`;
               {/* Existing items */}
               {form.items.length > 0 && (
                 <div style={{ marginBottom: 12 }}>
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 60px 60px 90px 32px", gap: 6, padding: "0 4px 6px", borderBottom: `1px solid ${COLORS.border}`, marginBottom: 6 }}>
-                    {["Procedimiento", "Pieza", "Cant.", "Precio", ""].map(h => (
-                      <div key={h} style={{ fontSize: 10, color: COLORS.textMuted, fontWeight: 700 }}>{h}</div>
-                    ))}
-                  </div>
-                  {form.items.map((it, idx) => (
-                    <div key={it.id} style={{ display: "grid", gridTemplateColumns: "1fr 60px 60px 90px 32px", gap: 6, padding: "6px 4px", borderBottom: `1px solid ${COLORS.border}44`, alignItems: "center" }}>
-                      <div style={{ fontSize: 12, color: COLORS.text, fontWeight: 600 }}>{it.procedure}</div>
-                      <div style={{ fontSize: 11, color: COLORS.textMuted, textAlign: "center" }}>{it.tooth !== "-" ? it.tooth : "—"}</div>
-                      <div style={{ fontSize: 12, color: COLORS.text, textAlign: "center" }}>{it.quantity}</div>
-                      <div style={{ fontSize: 12, color: COLORS.text, textAlign: "right" }}>{formatCLP(it.quantity * it.unitPrice)}</div>
-                      <button onClick={() => setForm(f => ({ ...f, items: f.items.filter((_, i) => i !== idx) }))}
-                        style={{ background: COLORS.danger + "15", color: COLORS.danger, border: "none", borderRadius: 4, padding: "3px 7px", fontSize: 12, cursor: "pointer" }}>×</button>
-                    </div>
-                  ))}
+                  <BudgetItemRows items={form.items} onChange={items => setForm(f => ({ ...f, items }))} />
                   <div style={{ textAlign: "right", marginTop: 8, fontSize: 13 }}>
                     <span style={{ color: COLORS.textMuted }}>Subtotal: </span>
                     <span style={{ fontWeight: 700, color: COLORS.text }}>{formatCLP(calcSubtotal(form.items))}</span>
@@ -5505,19 +5524,7 @@ Clínica Olimpia · Arturo Prat 350, Of. 506 · Temuco`;
               <div style={{ fontWeight: 700, color: COLORS.text, fontSize: 13, marginBottom: 12 }}>🦷 Procedimientos</div>
               {editForm.items.length > 0 && (
                 <div style={{ marginBottom: 12 }}>
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 60px 60px 90px 32px", gap: 6, padding: "0 4px 6px", borderBottom: `1px solid ${COLORS.border}`, marginBottom: 6 }}>
-                    {["Procedimiento","Pieza","Cant.","Precio",""].map(h => <div key={h} style={{ fontSize: 10, color: COLORS.textMuted, fontWeight: 700 }}>{h}</div>)}
-                  </div>
-                  {editForm.items.map((it, idx) => (
-                    <div key={it.id || idx} style={{ display: "grid", gridTemplateColumns: "1fr 60px 60px 90px 32px", gap: 6, padding: "6px 4px", borderBottom: `1px solid ${COLORS.border}44`, alignItems: "center" }}>
-                      <div style={{ fontSize: 12, color: COLORS.text, fontWeight: 600 }}>{it.procedure}</div>
-                      <div style={{ fontSize: 11, color: COLORS.textMuted, textAlign: "center" }}>{it.tooth !== "-" ? it.tooth : "—"}</div>
-                      <div style={{ fontSize: 12, color: COLORS.text, textAlign: "center" }}>{it.quantity}</div>
-                      <div style={{ fontSize: 12, color: COLORS.text, textAlign: "right" }}>{formatCLP(it.quantity * it.unitPrice)}</div>
-                      <button onClick={() => setEditForm(f => ({ ...f, items: f.items.filter((_, i) => i !== idx) }))}
-                        style={{ background: COLORS.danger + "15", color: COLORS.danger, border: "none", borderRadius: 4, padding: "3px 7px", fontSize: 12, cursor: "pointer" }}>×</button>
-                    </div>
-                  ))}
+                  <BudgetItemRows items={editForm.items} onChange={items => setEditForm(f => ({ ...f, items }))} />
                   <div style={{ textAlign: "right", marginTop: 8, fontSize: 13 }}>
                     <span style={{ color: COLORS.textMuted }}>Subtotal: </span>
                     <span style={{ fontWeight: 700, color: COLORS.text }}>{formatCLP(calcSubtotal(editForm.items))}</span>
