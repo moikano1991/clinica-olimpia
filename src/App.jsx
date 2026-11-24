@@ -5025,17 +5025,16 @@ Clínica Olimpia · Arturo Prat 350, Of. 506 · Temuco`;
       y += 6 + noteLines.length * 5 + 6;
     }
 
-    // Signature lines
-    const sigY = Math.max(y + 10, 240);
+    // Firma del paciente (izquierda) y firma + timbre de la Dra. (derecha)
+    const sigW = 46, sigH = sigW / FIRMA_TIMBRE_RATIO;
+    const sigY = Math.min(Math.max(y + 10, 232), 282 - 8);
+    doc.addImage(FIRMA_TIMBRE, "PNG", 160 - sigW / 2, sigY - sigH + 4, sigW, sigH);
     doc.setDrawColor(200, 210, 220);
     doc.line(14, sigY, 85, sigY);
-    doc.line(125, sigY, 196, sigY);
     doc.setFontSize(8);
     doc.setFont("helvetica", "normal");
     doc.setTextColor(100, 116, 139);
     doc.text("Firma y aceptación del paciente", 14, sigY + 5);
-    doc.text("Dra. María Florencia Muñoz", 125, sigY + 5);
-    doc.text("Cirujano Dentista", 125, sigY + 10);
 
     // Footer
     doc.setFillColor(240, 244, 248);
